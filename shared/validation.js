@@ -1,0 +1,223 @@
+import { validChart } from './rich-content.js'
+import { validEntryPath } from './attachments.js'
+
+const noteKinds = new Set([
+  'text',
+  'sticky',
+  'image',
+  'checklist',
+  'table',
+  'file',
+  'folder',
+  'link',
+  'markdown',
+  'latex',
+  'diagram',
+  'chart',
+])
+const hexColor = /^#[\da-f]{6}$/i
+const optionalString = (value, max = 100000) =>
+  value === undefined || (typeof value === 'string' && value.length <= max)
+const validProvenance = (value) =>
+  !!value &&
+  typeof value === 'object' &&
+  ['agent', 'conversationId', 'url'].every((key) =>
+    optionalString(value[key], key === 'url' ? 4000 : 128),
+  ) &&
+  (value.url === undefined || /^(https?:|codex:)/.test(value.url))
+const validSource = (value) =>
+  validProvenance(value) &&
+  typeof value.requestId === 'string' &&
+  value.requestId.length <= 128 &&
+  typeof value.section === 'string' &&
+  value.section.length <= 200 &&
+  typeof value.createdAt === 'string' &&
+  Number.isFinite(Date.parse(value.createdAt)) &&
+  (value.fingerprint === undefined ||
+    (typeof value.fingerprint === 'string' &&
+      /^[a-f0-9]{64}$/.test(value.fingerprint)))
+const validCaptureContent = (value) => {
+  if (!value || typeof value !== 'object') return false
+  const fields = ['summaryCharacters', 'markdownCharacters', 'sectionCharacters', 'transcriptCharacters', 'sections', 'decisions', 'actions', 'openQuestions', 'references', 'equations', 'diagrams', 'charts']
+  return (
+    optionalString(value.markdown, 200000) &&
+    (value.markdown === undefined ||
+      (Array.isArray(value.markdownNoteIds) &&
+        value.markdownNoteIds.length <= 64 &&
+        value.markdownNoteIds.every((id) => typeof id === 'string' && id.length <= 128))) &&
+    value.received && typeof value.received === 'object' &&
+    fields.every((field) => Number.isSafeInteger(value.received[field]) && value.received[field] >= 0) &&
+    Array.isArray(value.manifest) && value.manifest.length <= 5000 &&
+    value.manifest.every((entry) => entry && typeof entry.id === 'string' && entry.id.length <= 128 &&
+      typeof entry.contentHash === 'string' && /^[a-f0-9]{64}$/.test(entry.contentHash))
+  )
+}
+
+export function validNotebook(value) {
+  if (!value || typeof value !== 'object') return false
+  if (
+    value.version !== 1 ||
+    !Array.isArray(value.boards) ||
+    !value.boards.length ||
+    typeof value.activeBoardId !== 'string'
+  )
+    return false
+  if (
+    value.appearance !== undefined &&
+    (!value.appearance ||
+      typeof value.appearance.accent !== 'string' ||
+      typeof value.appearance.canvas !== 'string' ||
+      !hexColor.test(value.appearance.accent) ||
+      !hexColor.test(value.appearance.canvas))
+  )
+    return false
+  const boardIds = new Set(value.boards.map((board) => board?.id))
+  if (
+    boardIds.size !== value.boards.length ||
+    !boardIds.has(value.activeBoardId) ||
+    !value.boards.some((board) => board && !board.trashed)
+  )
+    return false
+  return value.boards.every((board) => {
+    if (
+      !board ||
+      typeof board.id !== 'string' ||
+      typeof board.title !== 'string' ||
+      typeof board.description !== 'string' ||
+      !Array.isArray(board.notes) ||
+      !Array.isArray(board.connections)
+    )
+      return false
+    if (
+      board.captures !== undefined &&
+      (!Array.isArray(board.captures) ||
+        !board.captures.every(
+          (capture) =>
+            capture &&
+            typeof capture.requestId === 'string' &&
+            capture.requestId.length <= 128 &&
+            typeof capture.fingerprint === 'string' &&
+            /^[a-f0-9]{64}$/.test(capture.fingerprint) &&
+            typeof capture.title === 'string' &&
+            typeof capture.summary === 'string' &&
+            typeof capture.createdAt === 'string' &&
+            Number.isFinite(Date.parse(capture.createdAt)) &&
+            (capture.source === undefined || validProvenance(capture.source)) &&
+            (capture.content === undefined || validCaptureContent(capture.content)) &&
+            Array.isArray(capture.noteIds) &&
+            capture.noteIds.every((id) => typeof id === 'string'),
+        ))
+    )
+      return false
+    const noteIds = new Set(board.notes.map((note) => note?.id))
+    return (
+      noteIds.size === board.notes.length &&
+      board.notes.every((note) => {
+        if (!note || typeof note.id !== 'string' || !noteKinds.has(note.kind))
+          return false
+        if (note.kind === 'folder' && !Array.isArray(note.entries)) return false
+        if (
+          note.entries !== undefined &&
+          (!Array.isArray(note.entries) || note.entries.length > 10000 ||
+            new Set(note.entries.map((entry) => entry?.path)).size !== note.entries.length ||
+            !note.entries.every((entry) => entry && validEntryPath(entry.path) &&
+              ['file', 'directory'].includes(entry.kind) && (entry.assetId === undefined || typeof entry.assetId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(entry.assetId)) &&
+              optionalString(entry.mime, 200) && optionalString(entry.error, 1000) &&
+              (entry.size === undefined || Number.isSafeInteger(entry.size) && entry.size >= 0) &&
+              (entry.modifiedAt === undefined || Number.isFinite(entry.modifiedAt)) &&
+              (entry.kind !== 'file' || !!entry.assetId || !!entry.error))))
+          return false
+        if (note.entries) {
+          const entries = new Map(note.entries.map((entry) => [entry.path, entry.kind]))
+          if (note.entries.some((entry) => {
+            const parts = entry.path.split('/')
+            return parts.slice(0, -1).some((_, index) => entries.get(parts.slice(0, index + 1).join('/')) !== 'directory')
+          })) return false
+        }
+        if (
+          ![note.x, note.y, note.width, note.height].every(Number.isFinite) ||
+          note.width <= 0 ||
+          note.height <= 0
+        )
+          return false
+        if (
+          ![
+            note.title,
+            note.body,
+            note.color,
+            note.label,
+            note.src,
+            note.assetId,
+            note.filename,
+            note.mime,
+            note.url,
+            note.latex,
+            note.mermaid,
+            note.caption,
+          ].every((field) => field === undefined || typeof field === 'string')
+        )
+          return false
+        if (
+          !optionalString(note.latex, 12000) ||
+          !optionalString(note.mermaid, 20000) ||
+          !optionalString(note.caption, 4000) ||
+          (note.chart !== undefined && !validChart(note.chart)) ||
+          (note.source !== undefined && !validSource(note.source))
+        )
+          return false
+        if (
+          (note.kind === 'latex' && !note.latex?.trim()) ||
+          (note.kind === 'diagram' && !note.mermaid?.trim()) ||
+          (note.kind === 'chart' && !validChart(note.chart))
+        )
+          return false
+        if (
+          note.columns !== undefined &&
+          (!Array.isArray(note.columns) ||
+            !note.columns.every((column) => typeof column === 'string'))
+        )
+          return false
+        if (
+          note.rows !== undefined &&
+          (!Array.isArray(note.rows) ||
+            !note.rows.every(
+              (row) =>
+                Array.isArray(row) &&
+                row.every((cell) => typeof cell === 'string'),
+            ))
+        )
+          return false
+        return (
+          note.items === undefined ||
+          (Array.isArray(note.items) &&
+            note.items.every(
+              (item) =>
+                item &&
+                typeof item.id === 'string' &&
+                typeof item.text === 'string' &&
+                typeof item.done === 'boolean' &&
+                optionalString(item.owner, 120) &&
+                (item.priority === undefined ||
+                  ['high', 'medium', 'low'].includes(item.priority)) &&
+                (item.dueDate === undefined ||
+                  (typeof item.dueDate === 'string' &&
+                    /^\d{4}-\d{2}-\d{2}$/.test(item.dueDate))),
+            ))
+        )
+      }) &&
+      board.connections.every(
+        (edge) =>
+          edge &&
+          typeof edge.id === 'string' &&
+          noteIds.has(edge.from) &&
+          noteIds.has(edge.to) &&
+          optionalString(edge.label, 300) &&
+          (edge.style === undefined || ['curve', 'straight', 'elbow'].includes(edge.style)) &&
+          (edge.arrow === undefined || ['end', 'both', 'none'].includes(edge.arrow)) &&
+          (edge.dashed === undefined || typeof edge.dashed === 'boolean') &&
+          (edge.color === undefined || hexColor.test(edge.color)) &&
+          [edge.fromSide, edge.toSide].every((side) => side === undefined || ['top', 'right', 'bottom', 'left'].includes(side)),
+      )
+    )
+  })
+}

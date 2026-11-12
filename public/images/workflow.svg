@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 280">
+  <defs><pattern id="dots" width="18" height="18" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r=".8" fill="#d5dbe7"/></pattern></defs>
+  <rect width="600" height="280" fill="#f5f7fc"/>
+  <rect width="600" height="280" fill="url(#dots)"/>
+  <g stroke="#b6c2de" stroke-width="2" fill="none"><path d="M168 126h66M354 126h66M294 155v44"/><path d="m227 122 6 4-6 4m186-8 6 4-6 4m-123 62 4 6 4-6"/></g>
+  <g fill="#fff" stroke="#dfe4ef"><rect x="48" y="97" width="120" height="58" rx="8"/><rect x="234" y="97" width="120" height="58" rx="8"/><rect x="420" y="97" width="132" height="58" rx="8"/><rect x="234" y="199" width="120" height="48" rx="8"/></g>
+  <rect x="234" y="97" width="120" height="58" rx="8" fill="#edf0ff" stroke="#a9b5ed"/>
+  <g font-family="'Microsoft YaHei',sans-serif" text-anchor="middle" font-size="16" fill="#546179"><text x="108" y="132">输入与记录</text><text x="294" y="132" fill="#5266c9">工作画布</text><text x="486" y="132">任务与交付</text><text x="294" y="229" font-size="14">资料归档</text></g>
+  <text x="48" y="48" font-family="Arial,sans-serif" font-size="12" font-weight="600" letter-spacing="2" fill="#98a4bc">WORKFLOW / V2.4</text>
+  <circle cx="48" cy="66" r="3" fill="#7889cf"/><path d="M60 66h75" stroke="#d1d8e8" stroke-width="2"/>
+</svg>

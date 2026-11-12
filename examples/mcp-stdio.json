@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "own": {
+      "command": "node",
+      "args": ["D:/Own/mcp-stdio.mjs"],
+      "env": { "OWN_URL": "http://127.0.0.1:5173" }
+    }
+  }
+}

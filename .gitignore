@@ -1,0 +1,15 @@
+node_modules/
+dist/
+data/
+.vite/
+*.local
+*.tsbuildinfo
+.DS_Store
+desktop/bin/
+desktop/obj/
+release/
+artifacts/
+videos/
+public/mathlive/
+*.own
+*.fieldnotes
