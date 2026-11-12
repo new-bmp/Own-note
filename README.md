@@ -6,7 +6,7 @@
 
 Windows 版本使用原生窗口和 WebView2。运行 **release/Own-Setup.exe** 安装后，可从开始菜单或桌面快捷方式打开；也可解压 `release/Own-win-x64.zip` 使用便携版。应用自动启动随包的 Node.js 保存与 MCP 服务，不需要打开浏览器或安装 Node.js/.NET。
 
-1.3 安装程序默认包含 Node.js、Python、GCC/G++ 与 GDB；Java、Go、Rust 可在组件页选择安装。工具保存在应用目录，不修改系统 PATH。[随包工具说明](docs/toolchains.md)。
+1.4 安装程序默认包含 Node.js、Python、GCC/G++ 与 GDB；Java、Go、Rust 可在组件页选择安装。工具保存在应用目录，不修改系统 PATH。[随包工具说明](docs/toolchains.md)。
 
 源码运行：`npm run desktop`；热更新：`npm run desktop:dev`；便携包：`npm run desktop:package`；安装程序：`npm run desktop:installer`。构建机需 .NET 10 SDK。客户端笔记保存在 `%LOCALAPPDATA%\Own\workspace`，安装、升级和卸载均保留笔记。[客户端使用与构建说明](docs/desktop.md)。
 
@@ -51,7 +51,9 @@ npm start
 
 ## Agent、公式与图
 
-左侧「连接 Agent」提供 MCP 的 HTTP / stdio / Codex 配置和可复制的完整整理要求。agent 可提交完整 Markdown 正文及摘要、决策、行动项和图，服务自动拆卡、摘要置顶并按两列排布。保存结果返回实际接收数量与正文一致性核对；`own_read_conversation` 可读回整份记录，避免只存摘要后误报完成。共 18 个工具，写入可重试，已有内容更新有版本保护。
+Agent Next to do 面向长期工作：独立项目中设置目标、范围、约束和验收，查看公开方案、下一步、阻塞、产物与交接记录。修改要求使旧执行凭证失效，整体暂停会停止 Own 内关联的代码、调试和媒体任务。重连可从完整工作记录恢复。外部 Agent 的其他行为仍依赖其遵守协作协议。
+
+左侧「连接 Agent」提供 MCP 的 HTTP / stdio / Codex 配置和可复制的完整整理要求。agent 可提交完整 Markdown 正文及摘要、决策、行动项和图，服务自动拆卡、摘要置顶并按两列排布。保存结果返回实际接收数量与正文一致性核对；`own_read_conversation` 可读回整份记录，避免只存摘要后误报完成。共 35 个工具，覆盖代码执行与真实调试、数据分析与来源制图、任意附件/文件夹、媒体转换保存、模型设置和卡片关系。`own_capabilities` 提供分功能示例与错误恢复；写入可重试，已有内容更新有版本保护。
 
 「添加内容」支持 Markdown、LaTeX 公式、Mermaid 图及柱状 / 折线 / 饼图。工具栏的「公式输入器」可直接编辑分数、根号、上下标、求和、积分和矩阵，提供数学键盘、结构空位跳转、常用示例与 LaTeX 源码切换；字体随包携带。
 

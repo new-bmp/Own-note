@@ -39,7 +39,7 @@ try {
 }
 
 const server = new Server(
-  { name: 'own-notes', version: '1.0.0', title: 'Own 笔记' },
+  upstream.getServerVersion() || { name: 'own-notes', version: '1.4.0', title: 'Own 笔记' },
   {
     capabilities: { tools: {}, resources: {}, prompts: {} },
     instructions: upstream.getInstructions(),

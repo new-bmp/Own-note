@@ -58,3 +58,6 @@ npm run desktop:installer
 `npm run test:installer` 在独立测试身份和临时目录中实际安装、覆盖升级、调用随包 Node.js / MCP 保存并读回记录，再验证卸载保留工作空间、删除快捷方式及卸载项。测试不打开应用窗口。
 
 调试可直接向 `Own.exe` 传入 `--app-root`、`--node`、`--data-dir`、`--profile-dir`、`--state-dir`、`--port`（0 表示自动选择）及 `--dev`。也可用 `FIELDNOTES_DATA_DIR` 指定工作空间。调试独立工作空间时应同时指定独立的 profile 和 state 目录。
+
+
+1.4 版补齐35个MCP工具与长期工作控制。连接客户端升级后重新连接以刷新工具目录；先调用 `own_capabilities`。独立项目可以编辑目标、范围、约束、验收并暂停；内置执行响应任务凭证变更，外部客户端仍需遵守定期上报协议。

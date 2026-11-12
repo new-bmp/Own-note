@@ -9,6 +9,8 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { createOwnMcpServer } from './mcp/server.mjs'
 import { toolCatalog } from './mcp/guide.mjs'
 import { createJobs } from './services/jobs.mjs'
+import { createMcpLab } from './mcp/workbench.mjs'
+import { createAssetTransfer } from './services/asset-transfer.mjs'
 import { createDebugSessions } from './services/debug.mjs'
 import { migrateAgentProjects } from './shared/agent-workspace.js'
 
@@ -85,6 +87,7 @@ export async function createFieldnotesServer({
   let vite
 
   function publishWorkspace(contents) {
+    void lab.reconcile(JSON.parse(contents))
     const event = `event: workspace\ndata: ${JSON.stringify({ etag: revision(contents) })}\n\n`
     for (const response of eventClients) response.write(event)
   }
@@ -119,6 +122,9 @@ export async function createFieldnotesServer({
     writeQueue = pending.catch(() => {})
     return pending
   }
+
+  const assets=createAssetTransfer(assetsDir)
+  const lab=createMcpLab({jobs,debugging,readWorkspace,mutateWorkspace})
 
   async function serveStatic(request, response, pathname) {
     const filename = path.resolve(staticDir, `.${pathname}`)
@@ -219,7 +225,7 @@ export async function createFieldnotesServer({
         }
         const mcp = createOwnMcpServer({
           readWorkspace,
-          mutateWorkspace,
+          mutateWorkspace,lab,jobs,assets,
           baseUrl: `http://${request.headers.host}`,
         })
         const transport = new StreamableHTTPServerTransport({
@@ -429,6 +435,8 @@ export async function createFieldnotesServer({
   })
   const close = server.close.bind(server)
   server.close = (callback) => {
+    lab.close()
+    assets.close()
     jobs.close()
     debugging.close()
     for (const response of eventClients) response.end()

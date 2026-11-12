@@ -11,6 +11,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { compileInstaller, installerPackage } from './installer.mjs'
+import { toolCatalog } from '../mcp/guide.mjs'
 
 if (process.platform !== 'win32') throw new Error('安装验收需要 Windows。')
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
@@ -93,7 +94,7 @@ try {
   const target = await powershell('$ownShell = New-Object -ComObject WScript.Shell; $ownLink = $ownShell.CreateShortcut($env:OWN_INSTALL_TEST_LINK); [PSCustomObject]@{ target = $ownLink.TargetPath; directory = $ownLink.WorkingDirectory } | ConvertTo-Json -Compress', { OWN_INSTALL_TEST_LINK: menuShortcut })
   assert.equal(path.resolve(JSON.parse(target).target), path.join(installDir, 'Own.exe'))
   assert.equal(path.resolve(JSON.parse(target).directory), installDir)
-  for (const entry of ['Own.exe', 'runtime/node.exe', 'app/server.mjs', 'app/mcp/server.mjs', 'app/mcp/conversations.mjs', 'app/dist/index.html']) {
+  for (const entry of ['Own.exe', 'runtime/node.exe', 'app/server.mjs', 'app/package-lock.json', 'app/mcp/server.mjs', 'app/mcp/conversations.mjs', 'app/mcp/workbench.mjs', 'app/shared/validation.js', 'app/services/asset-transfer.mjs', 'app/dist/index.html']) {
     assert.equal(await digest(path.join(installDir, entry)), await digest(path.join(packageDir, entry)), entry)
   }
   const packagedFiles = (await readdir(packageDir, { recursive: true, withFileTypes: true })).filter((entry) => entry.isFile()).length
@@ -108,7 +109,7 @@ try {
   const client = new Client({ name: 'own-installer-check', version: '1.0.0' })
   clients.push(client)
   await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', host.url)))
-  assert.equal((await client.listTools()).tools.length, 18)
+  assert.deepEqual((await client.listTools()).tools.map(t=>t.name).sort(),toolCatalog.map(([name])=>name).sort())
   const args = {
     requestId: 'installed-own-check', title: '安装程序验收', summary: '验证安装后的 Node.js 和 MCP 服务。',
     markdown: '## 验收\n\n完整正文保留。\n\n| 检查 | 状态 |\n| --- | --- |\n| 安装 | 通过 |\n\n正文末尾：INSTALLED-OWN-END。\n',
@@ -170,6 +171,18 @@ try {
   assert.ok(!planResult.isError,JSON.stringify(planResult.content))
   const leased=await client.callTool({name:'own_agent_next',arguments:{boardId:targetBoard.id,agentId:'installer-agent'}})
   assert.ok(!leased.isError,JSON.stringify(leased.content));assert.equal(leased.structuredContent.status,'running')
+  const callMcp=async(name,args)=>{const result=await client.callTool({name,arguments:args});assert.ok(!result.isError,JSON.stringify(result.content));return result.structuredContent}
+  const projectId=leased.structuredContent.projectId,lease=leased.structuredContent
+  const projectContext=await callMcp('own_read_agent_project',{projectId});assert.ok(projectContext.brief);assert.equal(projectContext.tasks[0].id,lease.note.id)
+  const codeNote=await callMcp('own_add_code',{projectId,requestId:'installed-mcp-code',title:'MCP 随包执行',cells:[{language:'cpp',code:'#include <iostream>\nint main(){int a,b;std::cin>>a>>b;std::cout<<a+b<<std::endl;}',stdin:'3 5\n'}]})
+  const codeRead=await callMcp('own_read_note',{projectId,noteId:codeNote.noteIds[0]})
+  const mcpJob=await callMcp('own_run_code',{projectId,requestId:'installed-mcp-run',noteId:codeRead.note.id,cellId:codeRead.note.cells[0].id,expectedHash:codeRead.contentHash,execution:{taskId:lease.note.id,agentId:'installer-agent',leaseToken:lease.leaseToken,revision:lease.revision}})
+  let mcpDone;const mcpDeadline=Date.now()+30000
+  while(Date.now()<mcpDeadline){mcpDone=await callMcp('own_lab_result',{jobId:mcpJob.id});if(mcpDone.savedToNote||mcpDone.resultNotice)break;await new Promise(resolve=>setTimeout(resolve,100))}
+  assert.equal(mcpDone.status,'success',mcpDone.stderr);assert.equal(mcpDone.stdout.trim(),'8');assert.equal(mcpDone.savedToNote,true)
+  const checkpoint=await callMcp('own_agent_checkpoint',{projectId,requestId:'installed-checkpoint',taskId:lease.note.id,agentId:'installer-agent',leaseToken:lease.leaseToken,revision:lease.revision,title:'安装后的交接记录',markdown:'## 真实结果\n通过MCP运行随包C++，输入3和5，输出8。\n\n## 下一步\n核验升级后记录。',nextAction:'核验升级后记录',artifactIds:codeNote.noteIds})
+  assert.match((await callMcp('own_read_note',{projectId,noteId:checkpoint.noteId})).note.body,/输出8/)
+  checks.push('35个MCP工具完整发现，项目上下文、带凭证的随包C++执行与自动落盘、完整工作记录读回')
   const complete=await client.callTool({name:'own_agent_report',arguments:{boardId:targetBoard.id,agentId:'installer-agent',noteId:leased.structuredContent.note.id,leaseToken:leased.structuredContent.leaseToken,revision:leased.structuredContent.revision,status:'done',progress:'随包工具验证完成。',evidence:'实际 Node stdin 输出 12，FFmpeg 转换成功，MP3 范围请求返回 206。'}})
   assert.ok(!complete.isError,JSON.stringify(complete.content));assert.equal(complete.structuredContent.accepted,true)
   checks.push('随包 Node 代码输入输出、离线 FFmpeg 转换与媒体范围请求、GPL 许可、构想领取与证据完成')
@@ -177,7 +190,7 @@ try {
   await client.close()
   await host.close()
   host = undefined
-  checks.push('安装后的随包 Node.js、18 个 MCP 工具、完整正文、公式及 Mermaid 保存')
+  checks.push('安装后的随包 Node.js、35 个 MCP 工具、完整正文、公式及 Mermaid 保存')
 
   const customFile = path.join(installDir, 'user-keep.txt')
   await writeFile(customFile, '用户额外放置的文件不得被覆盖升级或卸载清除。')
@@ -205,6 +218,8 @@ try {
   assert.ok(!read.isError, JSON.stringify(read.content))
   assert.equal(read.structuredContent.originalMarkdown, args.markdown)
   assert.equal(read.structuredContent.verification.status, 'verified')
+  const resumed=await stdio.callTool({name:'own_read_note',arguments:{projectId,noteId:checkpoint.noteId}})
+  assert.ok(!resumed.isError);assert.match(resumed.structuredContent.note.body,/输出8/)
   await stdio.close()
   await host.close()
   host = undefined

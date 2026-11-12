@@ -82,8 +82,8 @@ export function AgentConnection() {
         </li>
       </ol>
       <div className="agent-task-prompt">
-        <p>协作执行：在独立的“Agent Next to do”模式中发布构想与验收标准，持续报告待办进展。修改未实现笔记后，Agent 下次检查会收到新版本。</p>
-        <button onClick={async()=>{try{await navigator.clipboard.writeText('请在 Own 按 Next to do 协议协作：先用 own_list_agent_projects 查找独立项目；没有合适项目时用 own_create_agent_project 创建。后续协作工具传 projectId，用 own_publish_plan 发布完整公开方案、任务、验收标准与依赖。own_agent_next 领取最新任务；执行前、关键步骤后及每 30 秒用 own_agent_report 检查用户修改并报告进展。needsReplan=true 时停止旧方案并重新读取。提交 done 时提供实际产物、测试与限制。用 own_add_code（boardId 填 projectId）保留代码、标准输入和预期输出，代码由用户手动运行。公开方案与结果要完整，不提交隐藏推理。');setPlanCopied(true)}catch{setError('复制未成功，请选中内容手动复制。')}}}>{planCopied?<Check size={13}/>:<Copy size={13}/>}复制 Next to do 协作要求</button>
+        <p>长期工作：在独立的“Agent Next to do”模式中明确目标和边界，查看方案、下一步、阻塞、产物与交接记录。修改约束或暂停项目后，Agent 必须停止旧执行并重新读取。</p>
+        <button onClick={async()=>{try{await navigator.clipboard.writeText('请通过 Own 管理长期工作：先 own_capabilities(feature:agent)，查找独立 Agent 项目并用 own_read_agent_project 读取最新目标、范围、约束、验收、方案与工作记录。用 own_publish_plan 发布可供我理解的完整公开方案和任务，不覆盖我的修改。own_agent_next 领取任务；执行前、关键步骤后及每30秒 own_agent_report；needsReplan=true 或项目暂停时停止旧执行并重读。持续用 own_agent_checkpoint 保存已完成、依据、未完成、下一步、阻塞与产物引用，便于换会话恢复。新功能先查 own_capabilities：代码/调试必须显式运行，项目中携带 execution 凭证；分析图表保留数据来源；文件上传后读回校验；媒体转换后保存永久结果。提交 done 提供实际产物、测试与限制。只公开方案和事实，不提交隐藏推理，严格遵守原本授权范围。');setPlanCopied(true)}catch{setError('复制未成功，请选中内容手动复制。')}}}>{planCopied?<Check size={13}/>:<Copy size={13}/>}复制 Next to do 协作要求</button>
         <p>{organizePrompt}</p>
         <button onClick={async () => {
           try {
@@ -147,7 +147,7 @@ export function AgentConnection() {
         </div>
       )}
       <details className="agent-tools">
-        <summary>查看可用工具 · {integration?.tools.length || 10} 个</summary>
+        <summary>查看可用工具 · {integration?.tools.length || 0} 个</summary>
         <div>
           {integration?.tools.map(([name, title]) => (
             <p key={name}>

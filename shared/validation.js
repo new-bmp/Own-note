@@ -1,6 +1,7 @@
 import { validChart } from './rich-content.js'
 import { validEntryPath } from './attachments.js'
 import { validConcept, conceptDependencyError } from './concepts.js'
+import { validAgentBrief } from './agent-brief.js'
 
 const noteKinds = new Set([
   'text',
@@ -86,6 +87,8 @@ export function validNotebook(value) {
   const allProjects=[...value.boards,...value.agentProjects||[]]
   if(new Set(allProjects.map(board=>board?.id)).size!==allProjects.length)return false
   return allProjects.every((board) => {
+    if(board?.agentBrief!==undefined&&!validAgentBrief(board.agentBrief))return false
+    if(board?.executionReceipts!==undefined&&(!Array.isArray(board.executionReceipts)||board.executionReceipts.length>1000||!board.executionReceipts.every(r=>r&&typeof r.requestId==='string'&&r.requestId.length>0&&r.requestId.length<=128&&['code','debug','media'].includes(r.kind)&&typeof r.fingerprint==='string'&&/^[a-f0-9]{64}$/.test(r.fingerprint)&&Number.isFinite(r.at))))return false
     if (
       !board ||
       typeof board.id !== 'string' ||
@@ -152,6 +155,9 @@ export function validNotebook(value) {
             settings.filter !== undefined && (!settings.filter || !index(settings.filter.column) || !['contains', 'equals', 'greater', 'less'].includes(settings.filter.operator) || !optionalString(settings.filter.value, 20000))) return false
         }
         if (note.kind === 'folder' && !Array.isArray(note.entries)) return false
+        if(note.mediaSettings!==undefined){const s=note.mediaSettings;if(!s||!Number.isFinite(s.speed)||s.speed<.25||s.speed>3||!Number.isFinite(s.volume)||s.volume<0||s.volume>1||typeof s.loop!=='boolean'||!Number.isFinite(s.start)||s.start<0||s.start>100000000||!Array.isArray(s.marks)||s.marks.length>200||!s.marks.every(m=>m&&Number.isFinite(m.time)&&m.time>=0&&m.time<=100000000&&typeof m.label==='string'&&m.label.length<=200))return false}
+        if(note.modelSettings!==undefined&&(!note.modelSettings||!['wireframe','grid','autoRotate'].every(k=>typeof note.modelSettings[k]==='boolean')))return false
+        if(note.analysisOrigin!==undefined){const o=note.analysisOrigin;if(!o||typeof o.noteId!=='string'||o.noteId.length>128||typeof o.contentHash!=='string'||!/^[a-f0-9]{64}$/.test(o.contentHash)||!o.settings||typeof o.settings!=='object'||!['rows','totalGroups'].every(k=>Number.isSafeInteger(o[k])&&o[k]>=0))return false}
         if (
           note.entries !== undefined &&
           (!Array.isArray(note.entries) || note.entries.length > 10000 ||

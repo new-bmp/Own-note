@@ -94,7 +94,8 @@ export interface FolderEntry {
 }
 
 export interface CodeCell { id: string; language: string; code: string; stdin: string; expected?: string; output?: string; error?: string; exitCode?: number; executedAt?: number; executedCode?: string; executedLanguage?: string; executedInput?: string; executionCount?: number }
-export interface ConceptState { planId: string; status: 'pending' | 'running' | 'done' | 'blocked' | 'paused'; acceptance: string; dependsOn: string[]; agentId?: string; progress?: string; evidence?: string; lease?: { token: string; revision: string; expiresAt: number }; history?: { at: number; text: string }[] }
+export interface ConceptState { planId: string; status: 'pending' | 'running' | 'done' | 'blocked' | 'paused'; acceptance: string; dependsOn: string[]; agentId?: string; progress?: string; evidence?: string; nextAction?: string; blockers?: string[]; artifactIds?: string[]; checkpointId?: string; lease?: { token: string; revision: string; projectRevision?: string; expiresAt: number }; history?: { at: number; text: string }[] }
+export interface AgentBrief { goal: string; scope: string; constraints: string; acceptance: string; paused: boolean; allowCode: boolean; allowMedia: boolean }
 export interface AgentPresence { id: string; name: string; lastSeenAt: number; currentNoteId?: string; summary?: string }
 export interface AnalysisSettings {
   filter?: { column: number; operator: string; value: string }
@@ -133,6 +134,9 @@ export interface CanvasNote {
   source?: NoteSource
   entries?: FolderEntry[]
   modelPath?: string
+  mediaSettings?: { speed: number; volume: number; loop: boolean; start: number; marks: { time: number; label: string }[] }
+  modelSettings?: { wireframe: boolean; grid: boolean; autoRotate: boolean }
+  analysisOrigin?: { noteId: string; contentHash: string; settings: AnalysisSettings; rows: number; totalGroups: number }
   cells?: CodeCell[]
   analysisSource?: string
   analysisFormat?: 'csv' | 'tsv' | 'json'
@@ -153,6 +157,7 @@ export interface Connection {
   toSide?: 'top' | 'right' | 'bottom' | 'left'
 }
 export interface Board {
+  executionReceipts?: { requestId: string; kind: 'code' | 'debug' | 'media'; fingerprint: string; at: number }[]
   id: string
   title: string
   description: string
@@ -173,6 +178,7 @@ export interface Board {
   captures?: ConversationCapture[]
   agents?: AgentPresence[]
   legacyBoardId?: string
+  agentBrief?: AgentBrief
 }
 export interface Appearance {
   accent: string

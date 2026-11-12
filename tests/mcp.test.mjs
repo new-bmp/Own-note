@@ -1,4 +1,7 @@
 import test from 'node:test'
+import { createHash } from 'node:crypto'
+import { toolCatalog } from '../mcp/guide.mjs'
+import { editAgentBrief } from '../shared/agent-brief.js'
 import assert from 'node:assert/strict'
 import { mkdtemp, rm, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -122,7 +125,7 @@ const capture = () => ({
 test('MCP initializes over HTTP and exposes tools, resources, templates and an organizing prompt', async (t) => {
   const app = await fixture(t)
   const tools = await app.client.listTools()
-  assert.equal(tools.tools.length, 18)
+  assert.equal(tools.tools.length, toolCatalog.length)
   assert.ok(
     tools.tools.some(
       (tool) =>
@@ -144,8 +147,8 @@ test('MCP initializes over HTTP and exposes tools, resources, templates and an o
     /不编造/,
   )
   assert.equal(
-    (await app.client.listPrompts()).prompts[0].name,
-    'organize_conversation',
+    (await app.client.listPrompts()).prompts.some(p=>p.name==='organize_conversation'),
+    true,
   )
   assert.match(
     (
@@ -519,10 +522,210 @@ const plan = boardId => ({
 })
 const report = (boardId, lease, patch = {}) => ({ boardId, agentId: 'agent-a', noteId: lease.note.id, revision: lease.revision, leaseToken: lease.leaseToken, status: 'running', progress: '准备执行。', ...patch })
 
+const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms))
+async function waitLab(app,jobId,predicate=v=>!['starting','running'].includes(v.status)){
+  const deadline=Date.now()+20000
+  while(Date.now()<deadline){const value=await app.call('own_lab_result',{jobId});if(predicate(value))return value;await delay(40)}
+  assert.fail('MCP 工作台运行超时：'+JSON.stringify(await app.call('own_lab_result',{jobId})))
+}
+const execution=lease=>({taskId:lease.note.id,agentId:'agent-a',leaseToken:lease.leaseToken,revision:lease.revision})
+async function projectFixture(app){
+  const {projectId}=await app.call('own_create_agent_project',{requestId:'long-project',title:'长期数据工作',goal:'产出可复现报告',scope:'仅指定资料',constraints:'保留原始数据',acceptance:'真实运行并附证据'})
+  const args=plan(undefined);delete args.boardId;args.projectId=projectId
+  const published=await app.call('own_publish_plan',args),lease=await app.call('own_agent_next',{projectId,agentId:'agent-a'})
+  return {projectId,published,lease,args}
+}
+
+test('all features are discoverable through HTTP, catalog, resources and resume prompt without execution tokens',async t=>{
+  const app=await fixture(t),{projectId,lease}=await projectFixture(app)
+  const discovered=(await app.client.listTools()).tools,names=discovered.map(t=>t.name).sort()
+  for(const name of ['own_run_code','own_start_debug','own_debug_command']){const tool=discovered.find(t=>t.name===name);assert.equal(tool.annotations.destructiveHint,true);assert.equal(tool.annotations.openWorldHint,true)}
+  assert.equal(names.length,35);assert.deepEqual(names,toolCatalog.map(([name])=>name).sort())
+  assert.deepEqual((await app.call('own_capabilities',{})).tools.map(t=>t.name).sort(),names)
+  const catalog=JSON.parse((await app.client.readResource({uri:'own://capabilities'})).contents[0].text)
+  assert.deepEqual(catalog.tools.map(t=>t.name).sort(),names)
+  const brief=JSON.parse((await app.client.readResource({uri:`own://agent-projects/${projectId}`})).contents[0].text)
+  assert.equal(brief.brief.constraints,'保留原始数据')
+  const prompt=await app.client.getPrompt({name:'resume_agent_project',arguments:{projectId,agentId:'agent-a'}})
+  assert.match(prompt.messages[0].content.text,/own_agent_checkpoint/)
+  for(const tool of ['own_read_agent_project','own_read_board','own_agent_status'])assert.ok(!JSON.stringify(await app.call(tool,{projectId})).includes(lease.leaseToken),tool)
+  assert.ok(!JSON.stringify(await app.call('own_read_note',{projectId,noteId:lease.note.id})).includes(lease.leaseToken))
+  assert.deepEqual((await(await app.request('/api/integrations')).json()).tools.map(([name])=>name).sort(),names)
+})
+
+test('long-running project checkpoints retain full context, support reconnect, preserve user edits and invalidate old work',async t=>{
+  const app=await fixture(t),{projectId,lease,published,args}=await projectFixture(app)
+  const material=await app.call('own_add_note',{projectId,requestId:'artifact',title:'实际输出',body:'验证资料'})
+  const markdown='## 已完成与依据\n\n'+('保留实际过程、输入、测试和限制。\n'.repeat(7000))+'\n## 下一步\n核验最后一行。'
+  const checkpoint={projectId,requestId:'checkpoint-1',...execution(lease),title:'会话交接',markdown,nextAction:'核验最后一行',blockers:['等待确认口径'],artifactIds:material.noteIds}
+  const saved=await app.call('own_agent_checkpoint',checkpoint)
+  assert.equal((await app.call('own_agent_checkpoint',checkpoint)).duplicate,true)
+  assert.equal((await app.client.callTool({name:'own_agent_checkpoint',arguments:{...checkpoint,markdown:'不同记录'}})).isError,true)
+  assert.equal((await app.client.callTool({name:'own_agent_checkpoint',arguments:{...checkpoint,requestId:'bad-artifact',artifactIds:['missing']}})).isError,true)
+  const second=await app.connect(),read=await second.callTool({name:'own_read_agent_project',arguments:{projectId,limit:1}})
+  assert.equal(read.structuredContent.brief.goal,'产出可复现报告');assert.equal(read.structuredContent.total,2);assert.equal(read.structuredContent.nextOffset,1)
+  assert.equal((await app.call('own_read_note',{projectId,noteId:saved.noteId})).note.body,markdown)
+  const resumed=await app.call('own_agent_next',{projectId,agentId:'agent-a'})
+  assert.equal(resumed.resume.checkpointId,saved.noteId);assert.deepEqual(resumed.resume.artifactIds,material.noteIds)
+  const context=await app.call('own_read_note',{projectId,noteId:published.overviewId})
+  assert.equal((await app.client.callTool({name:'own_update_note',arguments:{projectId,noteId:published.overviewId,expectedHash:context.contentHash,body:'覆盖用户方案'}})).isError,true)
+  await editWorkspace(app,book=>{book.agentProjects.find(p=>p.id===projectId).notes.find(n=>n.id===published.overviewId).body+='\n用户新增要求：仅生成季度报告。'})
+  assert.equal((await app.call('own_agent_report',{...report(undefined,lease),projectId})).needsReplan,true)
+  assert.equal((await app.client.callTool({name:'own_agent_checkpoint',arguments:{...checkpoint,requestId:'stale'}})).isError,true)
+  assert.equal((await app.call('own_publish_plan',args)).duplicate,true)
+  assert.equal((await app.client.callTool({name:'own_publish_plan',arguments:{...args,title:'同ID不同方案'}})).isError,true)
+  const fresh=await app.call('own_agent_next',{projectId,agentId:'agent-a'});assert.notEqual(fresh.leaseToken,lease.leaseToken)
+  await editWorkspace(app,book=>{const index=book.agentProjects.findIndex(p=>p.id===projectId);book.agentProjects[index]=editAgentBrief(book.agentProjects[index],{constraints:'只做只读分析'})})
+  assert.equal((await app.call('own_agent_report',{...report(undefined,fresh),projectId})).needsReplan,true)
+  assert.equal((await app.call('own_read_agent_project',{projectId})).brief.constraints,'只做只读分析')
+  await editWorkspace(app,book=>{const i=book.agentProjects.findIndex(p=>p.id===projectId);book.agentProjects[i]=editAgentBrief(book.agentProjects[i],{goal:''})})
+  assert.equal((await app.call('own_read_agent_project',{projectId})).brief.goal,'')
+})
+
+test('MCP streams and saves actual code output once across concurrent retries, and preserves changed source',async t=>{
+  const app=await fixture(t),boardId=(await app.notebook()).activeBoardId
+  const added=await app.call('own_add_code',{boardId,requestId:'code-stream',title:'求和',cells:[{language:'javascript',stdin:'3 5',expected:'8',code:"let input='';for await(const chunk of process.stdin)input+=chunk;console.log('开始');await new Promise(r=>setTimeout(r,700));console.log(input.trim().split(/\\s+/).map(Number).reduce((a,b)=>a+b,0));"}]})
+  let read=await app.call('own_read_note',{boardId,noteId:added.noteIds[0]})
+  const args={boardId,requestId:'run-once',noteId:read.note.id,cellId:read.note.cells[0].id,expectedHash:read.contentHash}
+  const results=await Promise.all(Array.from({length:4},()=>app.call('own_run_code',args)))
+  assert.equal(new Set(results.map(r=>r.id)).size,1)
+  const streamed=await waitLab(app,results[0].id,v=>v.status==='running'&&v.stdout.includes('开始'));assert.equal(streamed.savedToNote,false)
+  const done=await waitLab(app,results[0].id,v=>v.status==='success'&&v.savedToNote);assert.equal(done.stdout,'开始\n8\n')
+  read=await app.call('own_read_note',{boardId,noteId:read.note.id});assert.equal(read.note.cells[0].executionCount,1);assert.equal(read.note.cells[0].executedInput,'3 5')
+  assert.equal((await app.call('own_run_code',args)).id,done.id)
+  assert.equal((await app.client.callTool({name:'own_run_code',arguments:{...args,requestId:'old-source'}})).isError,true)
+  const slow=await app.call('own_run_code',{...args,requestId:'source-edited',expectedHash:read.contentHash})
+  const cells=read.note.cells.map(c=>({id:c.id,language:c.language,stdin:c.stdin,code:'console.log("user edit");'}))
+  await app.call('own_update_note',{boardId,noteId:read.note.id,expectedHash:read.contentHash,cells})
+  const discarded=await waitLab(app,slow.id,v=>!['running','starting'].includes(v.status)&&!!v.resultNotice)
+  assert.equal(discarded.savedToNote,false);assert.match(discarded.resultNotice,/修改/)
+  assert.equal((await app.call('own_read_note',{boardId,noteId:read.note.id})).note.cells[0].code,cells[0].code)
+})
+
+test('project pause and execution switches stop bound jobs and reject writes, debugging and old credentials',async t=>{
+  const app=await fixture(t),{projectId,lease}=await projectFixture(app)
+  const added=await app.call('own_add_code',{projectId,requestId:'bound-code',title:'长期任务',cells:[{language:'javascript',code:'console.log("active");setInterval(()=>{},1000);'}]})
+  const note=await app.call('own_read_note',{projectId,noteId:added.noteIds[0]})
+  const args={projectId,requestId:'bound-run',noteId:note.note.id,cellId:note.note.cells[0].id,expectedHash:note.contentHash}
+  assert.equal((await app.client.callTool({name:'own_run_code',arguments:args})).isError,true)
+  const run=await app.call('own_run_code',{...args,execution:execution(lease)})
+  await waitLab(app,run.id,v=>v.stdout.includes('active'))
+  await editWorkspace(app,book=>{const i=book.agentProjects.findIndex(p=>p.id===projectId);book.agentProjects[i]=editAgentBrief(book.agentProjects[i],{paused:true})})
+  assert.equal((await waitLab(app,run.id)).status,'stopped')
+  assert.equal((await app.call('own_agent_next',{projectId,agentId:'agent-a'})).status,'paused')
+  for(const [name,arguments_]of [['own_add_note',{projectId,requestId:'paused-note',title:'不能写',body:'正文'}],['own_save_conversation',{projectId,requestId:'paused-conversation',title:'不能写',summary:'暂停时不写',markdown:'正文'}]])assert.equal((await app.client.callTool({name,arguments:arguments_})).isError,true)
+  await editWorkspace(app,book=>{const i=book.agentProjects.findIndex(p=>p.id===projectId);book.agentProjects[i]=editAgentBrief(book.agentProjects[i],{paused:false,allowCode:false})})
+  let fresh=await app.call('own_agent_next',{projectId,agentId:'agent-a'})
+  assert.equal((await app.client.callTool({name:'own_start_debug',arguments:{...args,requestId:'disabled-debug',execution:execution(fresh)}})).isError,true)
+  await editWorkspace(app,book=>{const i=book.agentProjects.findIndex(p=>p.id===projectId);book.agentProjects[i]=editAgentBrief(book.agentProjects[i],{allowCode:true})})
+  fresh=await app.call('own_agent_next',{projectId,agentId:'agent-a'})
+  const debug=await app.call('own_start_debug',{...args,requestId:'bound-debug',execution:execution(fresh)})
+  await waitLab(app,debug.id,v=>v.status==='paused')
+  await editWorkspace(app,book=>{const i=book.agentProjects.findIndex(p=>p.id===projectId);book.agentProjects[i]=editAgentBrief(book.agentProjects[i],{scope:'新的用户工作范围'})})
+  assert.equal((await waitLab(app,debug.id)).status,'stopped')
+  assert.equal((await app.client.callTool({name:'own_debug_command',arguments:{jobId:debug.id,action:'continue'}})).isError,true)
+})
+
+test('MCP debugger exposes real variables, watches, breakpoints, stepping and saved output',async t=>{
+  const app=await fixture(t),boardId=(await app.notebook()).activeBoardId
+  const saved=await app.call('own_add_code',{boardId,requestId:'debug-code',title:'单步学习',cells:[{language:'javascript',code:'let total = 3;\ntotal += 5;\nconsole.log(total);\ntotal += 2;\nconsole.log(total);'}]})
+  const note=await app.call('own_read_note',{boardId,noteId:saved.noteIds[0]})
+  const job=await app.call('own_start_debug',{boardId,requestId:'debug-run',noteId:note.note.id,cellId:note.note.cells[0].id,expectedHash:note.contentHash,breakpoints:[2],watches:['total * 2']})
+  let value=await waitLab(app,job.id,v=>v.status==='paused')
+  if(value.line!==2){await app.call('own_debug_command',{jobId:job.id,action:'continue'});value=await waitLab(app,job.id,v=>v.status==='paused'&&v.line===2)}
+  assert.equal(value.variables.find(v=>v.name==='total').value,'3');assert.equal(value.watches[0].value,'6')
+  await app.call('own_debug_command',{jobId:job.id,action:'next'});value=await waitLab(app,job.id,v=>v.status==='paused'&&v.line===3)
+  assert.equal(value.variables.find(v=>v.name==='total').value,'8');assert.equal(value.watches[0].value,'16');assert.ok(value.frames.length)
+  await app.call('own_debug_command',{jobId:job.id,action:'continue'});value=await waitLab(app,job.id,v=>v.status==='finished'&&v.savedToNote)
+  assert.equal(value.stdout,'8\n10\n');assert.equal((await app.call('own_read_note',{boardId,noteId:note.note.id})).note.cells[0].output,'8\n10\n')
+})
+
+test('analysis MCP retains row origins, sorts negative decimals, aggregates filtered data and saves reproducible charts',async t=>{
+  const app=await fixture(t),{projectId}=await projectFixture(app)
+  const saved=await app.call('own_add_analysis',{projectId,requestId:'data',title:'真实数据',data:'类别,数值\n甲,-2.5\n乙,10\n甲,1.5\n乙,\n丙,2',settings:{group:0,value:1,method:'sum'}})
+  const noteId=saved.noteIds[0],analyzed=await app.call('own_analyze_data',{projectId,noteId,settings:{sort:{column:1,ascending:true},filter:{column:1,operator:'less',value:'3'}},limit:2})
+  assert.deepEqual(analyzed.rows.map(r=>r.index),[1,3]);assert.equal(analyzed.nextOffset,2);assert.equal(analyzed.filteredRows,3);assert.equal(analyzed.statistics[1].sum,1)
+  assert.deepEqual(analyzed.groups,[{label:'甲',value:-1},{label:'丙',value:2}])
+  const settings={group:0,value:1,method:'sum',order:'label',chartType:'bar'}
+  const chart=await app.call('own_chart_from_analysis',{projectId,requestId:'real-chart',title:'来源可复查',noteId,expectedHash:analyzed.contentHash,settings})
+  const read=await app.call('own_read_note',{projectId,noteId:chart.noteIds[0]})
+  assert.deepEqual(Object.fromEntries(read.note.chart.labels.map((label,i)=>[label,read.note.chart.series[0].values[i]])),{甲:-1,乙:10,丙:2});assert.equal(read.note.analysisOrigin.contentHash,analyzed.contentHash);assert.equal(chart.truncated,false)
+  await app.call('own_update_note',{projectId,noteId,expectedHash:analyzed.contentHash,analysisSource:'类别,数值\n甲,99'})
+  assert.equal((await app.client.callTool({name:'own_chart_from_analysis',arguments:{projectId,requestId:'stale-chart',title:'旧数据',noteId,expectedHash:analyzed.contentHash,settings}})).isError,true)
+  const grid=await app.call('own_add_chart',{projectId,requestId:'grid-chart',title:'表格制图',grid:[['月份','销量'],['一月',3],['二月',5]]})
+  assert.deepEqual((await app.call('own_read_note',{projectId,noteId:grid.noteIds[0]})).note.chart.labels,['一月','二月'])
+  const conversation=await app.call('own_save_conversation',{projectId,requestId:'project-conversation',title:'分析说明',summary:'完整结论',markdown:'## 方法\n使用原始数据。\n## 结论\n保留负数与空值。'})
+  assert.equal((await app.call('own_read_conversation',{projectId,requestId:'project-conversation',includeOriginal:true})).verification.status,'verified');assert.ok(conversation.readerUrl.includes('mode=agents'))
+})
+
+async function upload(app,bytes,filename,requestId){
+  const sha256=createHash('sha256').update(bytes).digest('hex'),args={action:'start',requestId,filename,size:bytes.length,sha256}
+  const starts=await Promise.all([app.call('own_upload_asset',args),app.call('own_upload_asset',args)]);assert.equal(starts[0].uploadId,starts[1].uploadId)
+  const uploadId=starts[0].uploadId
+  for(let offset=0;offset<bytes.length;offset+=262144){const args={action:'chunk',uploadId,offset,data:bytes.subarray(offset,offset+262144).toString('base64')};await app.call('own_upload_asset',args);await app.call('own_upload_asset',args)}
+  const result=await app.call('own_upload_asset',{action:'commit',uploadId});assert.equal((await app.call('own_upload_asset',{action:'commit',uploadId})).assetId,result.assetId);assert.equal(result.contentHash,sha256);return result
+}
+
+test('MCP uploads arbitrary files losslessly, preserves folders, empty files and model resources, and guards connections',async t=>{
+  const app=await fixture(t),boardId=(await app.notebook()).activeBoardId,bytes=Buffer.alloc(360000);for(let i=0;i<bytes.length;i++)bytes[i]=i%251
+  const asset=await upload(app,bytes,'原始.bin','binary'),empty=await upload(app,Buffer.alloc(0),'空.txt','empty'),model=await upload(app,Buffer.from('solid sample\nendsolid sample'),'sample.stl','model')
+  const folder=await app.call('own_add_attachment',{boardId,requestId:'folder',title:'完整目录',kind:'folder',entries:[{path:'资料/原始.bin',kind:'file',assetId:asset.assetId},{path:'资料/空.txt',kind:'file',assetId:empty.assetId},{path:'空目录',kind:'directory'},{path:'模型/sample.stl',kind:'file',assetId:model.assetId}],modelPath:'模型/sample.stl',modelSettings:{wireframe:true,grid:false,autoRotate:false}})
+  const noteId=folder.noteIds[0],directory=await app.call('own_read_attachment',{boardId,noteId,limit:2});assert.equal(directory.total,6);assert.equal(directory.nextOffset,2)
+  assert.ok((await app.call('own_read_note',{boardId,noteId})).note.entries.some(e=>e.path==='空目录'&&e.kind==='directory'))
+  const chunks=[];let offset=0
+  do{const read=await app.call('own_read_attachment',{boardId,noteId,path:'资料/原始.bin',offset,limit:70001});assert.equal(read.contentHash,asset.contentHash);assert.ok(!('file'in read));chunks.push(Buffer.from(read.data,'base64'));offset=read.nextOffset}while(offset!==null)
+  assert.deepEqual(Buffer.concat(chunks),bytes)
+  assert.equal((await app.call('own_read_attachment',{boardId,noteId,path:'资料/空.txt'})).bytes,0)
+  assert.equal((await app.client.callTool({name:'own_add_attachment',arguments:{boardId,requestId:'unsafe-folder',title:'非法目录',kind:'folder',entries:[{path:'../outside',kind:'file',assetId:asset.assetId}]}})).isError,true)
+  const pending=await app.call('own_upload_asset',{action:'start',requestId:'bad-sha',filename:'bad.bin',size:3,sha256:'0'.repeat(64)})
+  assert.equal((await app.client.callTool({name:'own_upload_asset',arguments:{action:'chunk',uploadId:pending.uploadId,offset:1,data:Buffer.from('x').toString('base64')}})).isError,true)
+  await app.call('own_upload_asset',{action:'chunk',uploadId:pending.uploadId,offset:0,data:Buffer.from('abc').toString('base64')})
+  assert.equal((await app.client.callTool({name:'own_upload_asset',arguments:{action:'chunk',uploadId:pending.uploadId,offset:0,data:Buffer.from('xyz').toString('base64')}})).isError,true)
+  assert.equal((await app.client.callTool({name:'own_upload_asset',arguments:{action:'commit',uploadId:pending.uploadId}})).isError,true)
+  for(let i=0;i<17;i++)await upload(app,Buffer.alloc(0),`空${i}.txt`,`empty-${i}`)
+  const file=await app.call('own_add_attachment',{boardId,requestId:'file',title:'单文件',assetId:asset.assetId})
+  const args={boardId,requestId:'edge',from:noteId,to:file.noteIds[0],label:'参考资料',style:'elbow',arrow:'both',dashed:true,color:'#aabbcc',fromSide:'right',toSide:'left'}
+  const edge=await app.call('own_connect_notes',args);assert.equal((await app.call('own_connect_notes',args)).duplicate,true)
+  const edited=await app.call('own_update_connection',{boardId,connectionId:edge.connection.id,expectedHash:edge.contentHash,label:'新的关系',style:'curve'})
+  assert.equal(edited.connection.label,'新的关系')
+  assert.equal((await app.client.callTool({name:'own_update_connection',arguments:{boardId,connectionId:edge.connection.id,expectedHash:edge.contentHash,label:'旧版本'}})).isError,true)
+})
+
+test('MCP media conversion saves permanent results and persists player settings without changing originals',async t=>{
+  const app=await fixture(t),boardId=(await app.notebook()).activeBoardId,wav=Buffer.alloc(44+8820)
+  wav.write('RIFF');wav.writeUInt32LE(wav.length-8,4);wav.write('WAVEfmt ',8);wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);wav.writeUInt16LE(1,22);wav.writeUInt32LE(44100,24);wav.writeUInt32LE(88200,28);wav.writeUInt16LE(2,32);wav.writeUInt16LE(16,34);wav.write('data',36);wav.writeUInt32LE(8820,40)
+  const asset=await upload(app,wav,'sample.wav','wav')
+  const mediaSettings={speed:1.5,volume:.4,loop:true,start:.02,marks:[{time:.03,label:'说明'}]}
+  const note=await app.call('own_add_attachment',{boardId,requestId:'media-note',title:'原始录音',assetId:asset.assetId,mediaSettings})
+  const job=await app.call('own_convert_media',{boardId,requestId:'convert',noteId:note.noteIds[0],type:'audio'})
+  const done=await waitLab(app,job.id);assert.equal(done.status,'success',done.stderr);assert.equal(done.savedToNote,false,'conversion cache is not a permanent note')
+  const saved=await app.call('own_save_media_result',{boardId,requestId:'save-converted',title:'兼容录音',jobId:job.id})
+  const original=await app.call('own_read_note',{boardId,noteId:note.noteIds[0]}),converted=await app.call('own_read_attachment',{boardId,noteId:saved.noteIds[0]})
+  assert.deepEqual(original.note.mediaSettings,mediaSettings);assert.equal(original.note.assetId,asset.assetId);assert.equal(converted.mime,'audio/mpeg');assert.ok(converted.size>0)
+  assert.equal((await app.call('own_save_media_result',{boardId,requestId:'save-converted',title:'兼容录音',jobId:job.id})).duplicate,true)
+  await app.call('own_update_note',{boardId,noteId:original.note.id,expectedHash:original.contentHash,mediaSettings:{...mediaSettings,speed:2},x:20,y:30})
+  assert.equal((await app.call('own_read_note',{boardId,noteId:original.note.id})).note.mediaSettings.speed,2)
+})
+
+test('accepted execution requests cannot silently rerun after the Own service restarts',async t=>{
+  const app=await fixture(t),boardId=(await app.notebook()).activeBoardId
+  const saved=await app.call('own_add_code',{boardId,requestId:'restart-code',title:'重启幂等保护',cells:[{language:'javascript',code:'console.log("once");'}]})
+  const note=await app.call('own_read_note',{boardId,noteId:saved.noteIds[0]}),args={boardId,requestId:'durable-request',noteId:note.note.id,cellId:note.note.cells[0].id,expectedHash:note.contentHash}
+  const job=await app.call('own_run_code',args);await waitLab(app,job.id,v=>v.savedToNote)
+  const server=await createFieldnotesServer({dataDir:app.directory});server.listen(0,'127.0.0.1');await once(server,'listening')
+  const client=new Client({name:'restarted-service',version:'1.0.0'})
+  try{
+    await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.address().port}/mcp`)))
+    const retry=await client.callTool({name:'own_run_code',arguments:args});assert.equal(retry.isError,true);assert.match(retry.content[0].text,/已受理/)
+    const read=await client.callTool({name:'own_read_note',arguments:{boardId,noteId:note.note.id}});assert.equal(read.structuredContent.note.cells[0].executionCount,1)
+  }finally{await client.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve))}
+})
+
 test('independent Agent projects can be discovered, created idempotently and used without a canvas ID',async t=>{
   const app=await fixture(t),before=(await app.notebook()).boards
   const created=await app.call('own_create_agent_project',{requestId:'independent',title:'独立代码学习',description:'公开实现过程'})
-  assert.equal((await app.call('own_create_agent_project',{requestId:'independent',title:'不会覆盖用户项目名'})).duplicate,true)
+  assert.equal((await app.call('own_create_agent_project',{requestId:'independent',title:'独立代码学习',description:'公开实现过程'})).duplicate,true)
+  assert.equal((await app.client.callTool({name:'own_create_agent_project',arguments:{requestId:'independent',title:'不同项目'}})).isError,true)
   const list=await app.call('own_list_agent_projects',{query:'代码学习'})
   assert.equal(list.projects.length,1);assert.equal(list.projects[0].projectId,created.projectId)
   const args=plan(undefined);delete args.boardId;args.projectId=created.projectId
@@ -633,7 +836,8 @@ test('stdio bridge exposes the same tools and persists through the running HTTP 
     errors += data.toString()
   })
   const client = await app.connect(transport)
-  assert.equal((await client.listTools()).tools.length, 18, errors)
+  assert.equal((await client.listTools()).tools.length, toolCatalog.length, errors)
+  assert.equal(client.getServerVersion().version,'1.4.0')
   const response = await client.callTool({
     name: 'own_save_conversation',
     arguments: {

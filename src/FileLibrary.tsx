@@ -67,8 +67,8 @@ function FileContent({ note }: { note: CanvasNote }) {
         {data.url && type === 'image' && <img className="file-preview-image" src={data.url} alt={filename} onError={() => setData((data) => ({ ...data, error: '当前环境无法预览此图片格式，请另存为或用系统应用打开。' }))} />}
         {data.url && type === 'pdf' && <iframe className="file-preview-pdf" src={data.url} title={filename} />}
         <Suspense fallback={<p role="status">正在加载查看器…</p>}>
-          {data.url && (type === 'video' || type === 'audio') && <MediaPlayer url={data.url} kind={type} assetId={note.assetId} filename={filename}/>}
-          {data.blob && type === 'model' && <ModelViewer blob={data.blob} filename={filename} entries={note.entries || noEntries} resourcePath={note.modelPath}/>}
+          {data.url && (type === 'video' || type === 'audio') && <MediaPlayer url={data.url} kind={type} assetId={note.assetId} filename={filename} settings={note.mediaSettings}/>}
+          {data.blob && type === 'model' && <ModelViewer blob={data.blob} filename={filename} entries={note.entries || noEntries} resourcePath={note.modelPath} settings={note.modelSettings}/>}
         </Suspense>
         {data.text !== undefined && (!rich || raw ? <pre className="file-text-content">{data.text}</pre> : <RichPreview note={{ ...note, kind: ext === 'tex' ? 'latex' : ['mmd', 'mermaid'].includes(ext) ? 'diagram' : 'markdown', body: data.text, latex: data.text, mermaid: data.text }} />)}
         {data.parts && <div className="office-preview"><p className="office-preview-hint">内容预览 · 原文排版、图片与图表请使用系统应用查看</p>{data.parts.map((part, index) => <section key={index}>
@@ -92,7 +92,7 @@ export function FolderCard({ note, onOpen }: { note: CanvasNote; onOpen: () => v
 export function FileLibrary({ note, onClose, onExtract }: { note: CanvasNote; onClose: () => void; onExtract: (note: CanvasNote) => void }) {
   const [directory, setDirectory] = useState('')
   const [query, setQuery] = useState('')
-  const [selected, setSelected] = useState<FolderEntry | null>(null)
+  const [selected, setSelected] = useState<FolderEntry | null>(()=>note.entries?.find(e=>e.path===note.modelPath&&e.kind==='file')||null)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const entries = note.entries || []

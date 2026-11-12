@@ -138,5 +138,5 @@ export function createJobs({ assetsDir, derivedDir }) {
     return view(job)
   }
   const view = job => { const {child,outputPath,...value}=job; return value }
-  return { runtimes, start, get(id) { const job=jobs.get(id); if(!job)throw new Error('运行记录已过期。');return view(job) }, cancel(id) { const job=jobs.get(id);if(job?.status==='running'){job.reason='用户停止运行。';stop(job.child)} }, close() { closed=true;for(const job of jobs.values()){if(job.status==='running')job.reason='服务关闭，运行已停止。';stop(job.child)} } }
+  return { runtimes, start, get(id) { const job=jobs.get(id); if(!job)throw new Error('运行记录已过期。');return view(job) }, artifact(id){const job=jobs.get(id);if(job?.kind!=='media'||job.status!=='success'||!job.outputPath)throw new Error('转换尚未成功或结果已过期。');return {file:job.outputPath,mime:job.mime}}, cancel(id) { const job=jobs.get(id);if(job?.status==='running'){job.reason='用户停止运行。';stop(job.child)} }, close() { closed=true;for(const job of jobs.values()){if(job.status==='running')job.reason='服务关闭，运行已停止。';stop(job.child)} } }
 }

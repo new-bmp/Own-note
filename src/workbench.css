@@ -189,3 +189,12 @@
 @media(max-width:950px){.analysis-chart-workspace{grid-template-columns:220px minmax(0,1fr)}.debug-layout{grid-template-columns:1fr}.debug-inspector{border-left:0;border-top:1px solid #dbe4f1;max-height:360px}.analysis-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.agent-studio{padding:20px}.agent-studio .concept-columns{grid-template-columns:repeat(5,210px)}}
 @media(max-width:650px){.analysis-chart-workspace{grid-template-columns:1fr}.analysis-filter{flex-wrap:wrap}.analysis-filter input{width:100%}.analysis-import-bar{align-items:start}.analysis-import-bar>div{width:100%}.analysis-tabs>button:last-child{margin-left:0}}
 @media(max-width:700px){.workbench-overlay{padding:5px}.workbench-editor{width:100%;height:97dvh}.workbench-editor-body{padding:15px}.cell-io{grid-template-columns:1fr}.workbench-editor-footer>span{display:none}.workbench-editor-header{padding:16px}.model-viewport{height:320px}.media-transport{gap:8px}.lab-actions{gap:8px}.lab-actions label{flex-direction:column;align-items:start}.concept-columns{grid-template-columns:repeat(5,260px)}.work-mode .creation-toolbar{max-height:none;max-width:95%;overflow-x:auto;overflow-y:hidden}}
+.agent-control-summary { display:flex;gap:14px;align-items:center;background:#eef3ff;border:1px solid #d6dff1;border-radius:10px;padding:16px 20px;margin-bottom:20px;color:#283e5d; }
+.agent-control-summary > div { flex:1;min-width:0; }
+.agent-control-summary p { margin:7px 0 0;white-space:pre-wrap;font-size:13px; }
+.agent-control-summary.project-paused { background:#fff5e5;border-color:#ebd5ac; }
+.agent-brief-editor { max-width:900px;background:white;padding:24px;border:1px solid #dce3ed;border-radius:10px;color:#283e5d; }
+.agent-brief-editor > label { display:flex;flex-direction:column;gap:8px;margin:20px 0;font-size:14px; }
+.agent-brief-editor textarea { min-height:110px;resize:vertical;padding:12px;border:1px solid #bdcbe0;border-radius:6px;font:14px/1.7 inherit;color:#283e5d; }
+.agent-brief-editor > .lab-checkbox { flex-direction:row;align-items:center; }
+@media(max-width:900px) { .agent-control-summary { flex-wrap:wrap; }.agent-control-summary > div { flex-basis:100%; } }

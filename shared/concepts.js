@@ -29,6 +29,9 @@ export function validConcept(value) {
     str(value.acceptance,12000) && Array.isArray(value.dependsOn) && value.dependsOn.length<=100 && new Set(value.dependsOn).size===value.dependsOn.length && value.dependsOn.every(v=>str(v,128)&&v.length>0) &&
     ['progress','evidence'].every(k=>value[k]===undefined||str(value[k],50000)) &&
     (value.agentId===undefined||str(value.agentId,128)) &&
-    (value.lease===undefined||value.lease&&str(value.lease.token,128)&&str(value.lease.revision,64)&&Number.isFinite(value.lease.expiresAt)) &&
+    (value.nextAction===undefined||str(value.nextAction,4000)) &&
+    (value.checkpointId===undefined||str(value.checkpointId,128)) &&
+    ['blockers','artifactIds'].every(k=>value[k]===undefined||Array.isArray(value[k])&&value[k].length<=100&&value[k].every(v=>str(v,k==='blockers'?2000:128))) &&
+    (value.lease===undefined||value.lease&&str(value.lease.token,128)&&str(value.lease.revision,64)&&(value.lease.projectRevision===undefined||typeof value.lease.projectRevision==='string'&&/^[a-f0-9]{64}$/.test(value.lease.projectRevision))&&Number.isFinite(value.lease.expiresAt)) &&
     (value.history===undefined||Array.isArray(value.history)&&value.history.length<=200&&value.history.every(e=>e&&Number.isFinite(e.at)&&str(e.text,4000)))
 }

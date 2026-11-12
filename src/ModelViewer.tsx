@@ -8,19 +8,21 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js'
 import { PLYLoader } from 'three/addons/loaders/PLYLoader.js'
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js'
 import { ThreeMFLoader } from 'three/addons/loaders/3MFLoader.js'
-import type { FolderEntry } from './model'
+import type { CanvasNote, FolderEntry } from './model'
 import { getAsset, downloadFile } from './storage'
 import { extension } from '../shared/attachments.js'
 import { RotateCcw, Download, Pause, Play } from 'lucide-react'
 const noEntries:FolderEntry[]=[]
-export function ModelViewer({blob,filename,entries=noEntries,resourcePath}:{blob:Blob;filename:string;entries?:FolderEntry[];resourcePath?:string}){
+export function ModelViewer({blob,filename,entries=noEntries,resourcePath,settings}:{blob:Blob;filename:string;entries?:FolderEntry[];resourcePath?:string;settings?:CanvasNote['modelSettings']}){
   const host=useRef<HTMLDivElement>(null),actions=useRef<{reset:()=>void;wire:(v:boolean)=>void;rotate:(v:boolean)=>void;screenshot:()=>void;grid:(v:boolean)=>void}|undefined>(undefined)
   const [error,setError]=useState(''),[info,setInfo]=useState('正在读取 3D 模型…'),[wire,setWire]=useState(false),[rotate,setRotate]=useState(false),[grid,setGrid]=useState(true)
+  const settingsRef=useRef(settings);settingsRef.current=settings
+  useEffect(()=>{setWire(settings?.wireframe??false);setRotate(settings?.autoRotate??false);setGrid(settings?.grid??true);actions.current?.wire(settings?.wireframe??false);actions.current?.rotate(settings?.autoRotate??false);actions.current?.grid(settings?.grid??true)},[settings])
   useEffect(()=>{
     let active=true,renderer:THREE.WebGLRenderer|undefined,controls:OrbitControls|undefined,frame=0,observer:ResizeObserver|undefined,root:THREE.Object3D|undefined,scene:THREE.Scene|undefined,mixer:THREE.AnimationMixer|undefined
     const urls:string[]=[],resources=new Map<string,string>(),materials=new Set<THREE.Material>()
     function disposeObjects(object?:THREE.Object3D){object?.traverse(child=>{const mesh=child as THREE.Mesh;mesh.geometry?.dispose();if(mesh.material)for(const mat of Array.isArray(mesh.material)?mesh.material:[mesh.material]){for(const value of Object.values(mat))if(value instanceof THREE.Texture)value.dispose();mat.dispose()}})}
-    setError('');setInfo('正在读取 3D 模型…');setWire(false);setRotate(false);setGrid(true)
+    setError('');setInfo('正在读取 3D 模型…');setWire(settingsRef.current?.wireframe??false);setRotate(settingsRef.current?.autoRotate??false);setGrid(settingsRef.current?.grid??true)
     void(async()=>{
       try{
         if(blob.size>100*1024*1024)throw new Error('模型超过 100 MB。')
@@ -71,6 +73,7 @@ export function ModelViewer({blob,filename,entries=noEntries,resourcePath}:{blob
         if(animations.length){mixer=new THREE.AnimationMixer(root);animations.forEach(clip=>mixer!.clipAction(clip).play())}
         const reset=()=>{camera.position.set(4,3,5);controls!.target.set(0,0,0);controls!.update()};reset()
         actions.current={reset,wire:v=>materials.forEach(m=>{if('wireframe'in m){(m as THREE.MeshStandardMaterial).wireframe=v;m.needsUpdate=true}}),rotate:v=>{controls!.autoRotate=v},grid:v=>{floor.visible=v},screenshot:()=>renderer!.domElement.toBlob(image=>{if(image)downloadFile(image,filename+'.png')})}
+        actions.current.wire(settingsRef.current?.wireframe??false);actions.current.rotate(settingsRef.current?.autoRotate??false);actions.current.grid(settingsRef.current?.grid??true)
         observer=new ResizeObserver(()=>{if(!host.current||!renderer)return;const{width,height}=host.current.getBoundingClientRect();renderer.setSize(width,height);camera.aspect=width/Math.max(1,height);camera.updateProjectionMatrix()});observer.observe(host.current)
         const clock=new THREE.Clock();function draw(){if(!active||!renderer||!scene)return;frame=requestAnimationFrame(draw);mixer?.update(clock.getDelta());controls!.update();renderer.render(scene,camera)}draw()
         setInfo(`${vertices.toLocaleString()} 顶点 · ${Math.round(triangles).toLocaleString()} 三角面${animations.length?' · '+animations.length+' 段动画':''} · 拖动旋转，滚轮缩放，右键平移`)

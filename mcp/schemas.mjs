@@ -5,6 +5,12 @@ const text = (max = 12000) => z.string().trim().min(1).max(max)
 // and leading/trailing newlines. A trim transform would lose source content.
 const markdown = (max) => z.string().max(max).refine((value) => value.trim().length > 0, '正文不能为空。')
 export const id = text(128)
+export const target={boardId:id.optional().describe('画布 ID；Agent 项目使用 projectId。'),projectId:id.optional().describe('独立 Agent 项目 ID；不要同时填写不同的 boardId。')}
+export const executionSchema=z.object({taskId:id,agentId:id,leaseToken:id,revision:z.string().regex(/^[a-f0-9]{64}$/)}).strict()
+export const codeCellSchema=z.object({language:z.enum(['javascript','typescript','python','sql','html','css','json','cpp','c','java','go','rust','csharp','shell','markdown']),code:z.string().max(100000),stdin:z.string().max(64000).default(''),expected:z.string().max(262144).optional()}).strict()
+export const mediaSettingsSchema=z.object({speed:z.number().min(0.25).max(3),volume:z.number().min(0).max(1),loop:z.boolean(),start:z.number().min(0).max(100000000),marks:z.array(z.object({time:z.number().min(0).max(100000000),label:z.string().max(200)}).strict()).max(200)}).strict()
+export const modelSettingsSchema=z.object({wireframe:z.boolean(),grid:z.boolean(),autoRotate:z.boolean()}).strict()
+export const analysisSettingsSchema=z.object({filter:z.object({column:z.number().int().min(-1).max(199),operator:z.enum(['contains','equals','greater','less']),value:z.string().max(20000)}).strict().optional(),sort:z.object({column:z.number().int().min(-1).max(199),ascending:z.boolean()}).strict().optional(),group:z.number().int().min(0).max(199).optional(),value:z.number().int().min(0).max(199).optional(),method:z.enum(['sum','mean','count']).optional(),chartType:z.enum(['bar','line','pie']).optional(),order:z.enum(['source','value','label']).optional()}).strict()
 export const color = z.string().regex(/^#[\da-f]{6}$/i)
 export const action = z
   .object({
@@ -55,7 +61,8 @@ export const provenance = z
   })
   .strict()
 export const addBase = {
-  boardId: id,
+  ...target,
+  execution: executionSchema.optional(),
   requestId: id.describe(
     '本次操作的幂等 ID；重试时保持不变，新的写入使用新 ID。',
   ),
@@ -66,7 +73,8 @@ export const addBase = {
 export const conversationSchema = z
   .object({
     requestId: addBase.requestId,
-    boardId: id.optional().describe('追加到指定画布；省略则创建新画布。'),
+    ...target,
+    execution:executionSchema.optional(),
     title: text(200),
     summary: text(6000).describe(
       '2–4 句话概述目标、进展和结果。摘要只是导读；完整整理还须提供 markdown 或详细 sections，不要把正文压缩成摘要。',
