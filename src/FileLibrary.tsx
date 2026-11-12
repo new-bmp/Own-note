@@ -16,7 +16,7 @@ export function entryNote(folder: CanvasNote, entry: FolderEntry): CanvasNote {
     assetId: entry.assetId, size: entry.size, mime: entry.mime, entries: folder.entries, modelPath: entry.path }
 }
 
-function FileContent({ note }: { note: CanvasNote }) {
+export function FileContent({ note, readOnly = false }: { note: CanvasNote; readOnly?: boolean }) {
   const [data, setData] = useState<{ blob?: Blob; url?: string; text?: string; parts?: DocumentPart[]; error?: string; clipped?: boolean }>({})
   const [raw, setRaw] = useState(false)
   const filename = note.filename || note.title || '附件'
@@ -57,7 +57,7 @@ function FileContent({ note }: { note: CanvasNote }) {
     <div className="file-detail">
       <header className="file-detail-header"><div><strong>{filename}</strong><small>{size(note.size)} · {inferMime(filename, note.mime)}</small></div>
         {data.blob && <button className="secondary-button" onClick={() => downloadFile(data.blob!, filename)}><Download size={14} />另存为</button>}
-        {window.ownDesktop && note.assetId && <button className="secondary-button" onClick={() => void openNativeAsset(note.assetId!, filename).catch((error) => setData((data) => ({ ...data, error: error.message })))}><ExternalLink size={14} />用系统应用打开</button>}
+        {!readOnly && window.ownDesktop && note.assetId && <button className="secondary-button" onClick={() => void openNativeAsset(note.assetId!, filename).catch((error) => setData((data) => ({ ...data, error: error.message })))}><ExternalLink size={14} />用系统应用打开</button>}
       </header>
       {data.error && <p className="file-preview-notice" role="alert">{data.error}</p>}
       {!data.blob && !data.error && <p className="file-preview-notice" role="status">正在读取文件…</p>}
@@ -67,7 +67,7 @@ function FileContent({ note }: { note: CanvasNote }) {
         {data.url && type === 'image' && <img className="file-preview-image" src={data.url} alt={filename} onError={() => setData((data) => ({ ...data, error: '当前环境无法预览此图片格式，请另存为或用系统应用打开。' }))} />}
         {data.url && type === 'pdf' && <iframe className="file-preview-pdf" src={data.url} title={filename} />}
         <Suspense fallback={<p role="status">正在加载查看器…</p>}>
-          {data.url && (type === 'video' || type === 'audio') && <MediaPlayer url={data.url} kind={type} assetId={note.assetId} filename={filename} settings={note.mediaSettings}/>}
+          {data.url && (type === 'video' || type === 'audio') && <MediaPlayer url={data.url} kind={type} assetId={note.assetId} filename={filename} settings={note.mediaSettings} readOnly={readOnly}/>}
           {data.blob && type === 'model' && <ModelViewer blob={data.blob} filename={filename} entries={note.entries || noEntries} resourcePath={note.modelPath} settings={note.modelSettings}/>}
         </Suspense>
         {data.text !== undefined && (!rich || raw ? <pre className="file-text-content">{data.text}</pre> : <RichPreview note={{ ...note, kind: ext === 'tex' ? 'latex' : ['mmd', 'mermaid'].includes(ext) ? 'diagram' : 'markdown', body: data.text, latex: data.text, mermaid: data.text }} />)}
@@ -89,7 +89,7 @@ export function FolderCard({ note, onOpen }: { note: CanvasNote; onOpen: () => v
   </div>
 }
 
-export function FileLibrary({ note, onClose, onExtract }: { note: CanvasNote; onClose: () => void; onExtract: (note: CanvasNote) => void }) {
+export function FileLibrary({ note, onClose, onExtract, readOnly = false }: { note: CanvasNote; onClose: () => void; onExtract?: (note: CanvasNote) => void; readOnly?: boolean }) {
   const [directory, setDirectory] = useState('')
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<FolderEntry | null>(()=>note.entries?.find(e=>e.path===note.modelPath&&e.kind==='file')||null)
@@ -137,8 +137,8 @@ export function FileLibrary({ note, onClose, onExtract }: { note: CanvasNote; on
           }}>{entry.kind === 'directory' ? <FolderOpen size={17} /> : <FileText size={17} />}<span><strong>{query ? entry.path : entry.path.split('/').at(-1)}</strong><small>{entry.error ? '未导入 · 点击查看原因' : entry.kind === 'directory' ? '文件夹' : size(entry.size)}</small></span>{entry.kind === 'directory' && <ChevronRight size={14} />}</button>)}{!visible.length && <p className="file-preview-notice">{query ? '没有匹配的文件。' : '此文件夹为空。'}</p>}</div>
           <footer>{entries.filter((entry) => entry.kind === 'file' && entry.assetId).length} 个文件已保存在笔记中</footer>
         </aside>}
-        <main className="file-library-main">{current ? <FileContent key={current.assetId || current.src} note={current} /> : <div className="file-no-preview"><FolderOpen size={44} /><h3>{selected?.error ? '这个文件未能导入' : '选择文件查看内容'}</h3><p>{selected?.error || '支持图片、PDF、音视频、文本、代码，以及 Word、Excel、PowerPoint 内容预览。'}</p></div>}
-          {current && note.kind === 'folder' && <div className="folder-extract"><button className="secondary-button" onClick={() => onExtract(current)}><Plus size={14} />将此文件放到画布</button></div>}
+        <main className="file-library-main">{current ? <FileContent key={current.assetId || current.src} note={current} readOnly={readOnly} /> : <div className="file-no-preview"><FolderOpen size={44} /><h3>{selected?.error ? '这个文件未能导入' : '选择文件查看内容'}</h3><p>{selected?.error || '支持图片、PDF、音视频、文本、代码，以及 Word、Excel、PowerPoint 内容预览。'}</p></div>}
+          {!readOnly && onExtract && current && note.kind === 'folder' && <div className="folder-extract"><button className="secondary-button" onClick={() => onExtract(current)}><Plus size={14} />将此文件放到画布</button></div>}
         </main>
       </div>
     </section>

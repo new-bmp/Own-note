@@ -169,3 +169,9 @@ Own 在内部代码、调试和媒体执行中强制验证 execution（taskId、
 ## 验证
 
 `npm test` 使用官方 MCP Client 连接临时 HTTP 服务及真实 stdio 子进程，验证初始化、发现、资源、提示、整理落盘、幂等重试、并发、冲突、语法与数据验证、搜索及卡片更新。临时测试工作空间与用户笔记隔离。`npm run build` 检查 TypeScript 并构建生产资源。
+
+## 子画布与演讲
+
+`own_create_board({requestId,title,parentBoardId?,description?,x?,y?})` 创建画布。指定 `parentBoardId` 时原子创建下级与上级入口；省略创建根画布。返回 `boardId`、`parentBoardId`、`portalNoteId`，后续笔记工具用新的 `boardId`。相同 requestId 和参数重试不重复创建，参数变化会拒绝。子画布支持继续嵌套，共用工作空间及原始附件 ID。
+
+`own_list_boards({parentBoardId})` 查直接下级，省略查全部层级；`own_read_board` 返回 `path`、`childBoards` 和入口笔记的 `childBoardId`。`own_capabilities({feature:"canvas"})` 返回示例。层级不能循环，入口不能跨上级，删除入口保留下级。演讲仅在客户端进入，内容只读，临时布局不落盘；MCP 写入仍作用于正式笔记，已打开的演讲快照不会被远端更新打断。

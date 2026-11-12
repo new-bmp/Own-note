@@ -1,5 +1,10 @@
 // Examples use placeholders only for values returned by a preceding call.
 export const featureHelp={
+  canvas:{
+    steps:['own_list_boards 定位上级画布；own_read_board 获取 path、childBoards 和完整内容','own_create_board 指定 parentBoardId 创建子画布，用返回 boardId 保存内容','所有层级共用附件；演讲模式在客户端全屏打开，临时布局不保存且内容只读'],
+    example:{tool:'own_create_board',arguments:{parentBoardId:'上级画布ID',requestId:'report-detail-001',title:'报告详情',description:'展开报告依据与附件'}},
+    recovery:'子画布只属于一个上级，禁止循环和悬空引用；入口删除保留子画布，可从侧边栏进入。被回收的画布需用户恢复。',
+  },
   agent:{
     steps:['own_read_agent_project；分页读完任务，own_read_note 读方案和最近 checkpoint','own_agent_next 领取；遵守返回 brief；每30秒和关键动作前 own_agent_report','own_agent_checkpoint 留完整记录，done 附 evidence'],
     example:{tool:'own_agent_checkpoint',arguments:{projectId:'返回的 projectId',requestId:'handoff-001',taskId:'领取的 note.id',agentId:'当前 Agent 的稳定 ID',leaseToken:'领取返回的 leaseToken',revision:'领取返回的 revision',title:'本次工作与交接',markdown:'## 已完成\n实际产物与验证。\n## 依据\n公开决策与来源。\n## 未完成\n剩余问题与限制。',nextAction:'具体下一步',blockers:[],artifactIds:[]}},

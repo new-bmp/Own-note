@@ -540,7 +540,7 @@ test('all features are discoverable through HTTP, catalog, resources and resume 
   const app=await fixture(t),{projectId,lease}=await projectFixture(app)
   const discovered=(await app.client.listTools()).tools,names=discovered.map(t=>t.name).sort()
   for(const name of ['own_run_code','own_start_debug','own_debug_command']){const tool=discovered.find(t=>t.name===name);assert.equal(tool.annotations.destructiveHint,true);assert.equal(tool.annotations.openWorldHint,true)}
-  assert.equal(names.length,35);assert.deepEqual(names,toolCatalog.map(([name])=>name).sort())
+  assert.equal(names.length,toolCatalog.length);assert.deepEqual(names,toolCatalog.map(([name])=>name).sort())
   assert.deepEqual((await app.call('own_capabilities',{})).tools.map(t=>t.name).sort(),names)
   const catalog=JSON.parse((await app.client.readResource({uri:'own://capabilities'})).contents[0].text)
   assert.deepEqual(catalog.tools.map(t=>t.name).sort(),names)
@@ -837,7 +837,7 @@ test('stdio bridge exposes the same tools and persists through the running HTTP 
   })
   const client = await app.connect(transport)
   assert.equal((await client.listTools()).tools.length, toolCatalog.length, errors)
-  assert.equal(client.getServerVersion().version,'1.4.0')
+  assert.equal(client.getServerVersion().version,'1.5.0')
   const response = await client.callTool({
     name: 'own_save_conversation',
     arguments: {
@@ -854,4 +854,46 @@ test('stdio bridge exposes the same tools and persists through the running HTTP 
     (await client.readResource({ uri: 'own://guide' })).contents[0].text,
     /会话整理/,
   )
+})
+
+
+test('MCP creates nested canvases atomically with shared storage, discovers paths and protects retries and invalid references', async t => {
+  const app = await fixture(t, true)
+  const root = await app.call('own_create_board', { requestId: 'root-001', title: '汇报' })
+  const args = { requestId: 'child-001', parentBoardId: root.boardId, title: '详情', x: -300, y: 150 }
+  const child = await app.call('own_create_board', args)
+  const nested = await app.call('own_create_board', { requestId: 'nested-001', parentBoardId: child.boardId, title: '原始依据' })
+  assert.equal(child.parentBoardId, root.boardId)
+  assert.equal(child.sharedStorage, true)
+  assert.ok(child.portalNoteId)
+  const rootRead = await app.call('own_read_board', { boardId: root.boardId })
+  assert.equal(rootRead.notes[0].kind, 'board')
+  assert.equal(rootRead.notes[0].childBoardId, child.boardId)
+  assert.equal(rootRead.notes[0].x, -300)
+  assert.equal(rootRead.notes[0].y, 150)
+  assert.deepEqual(rootRead.childBoards.map(board => board.id), [child.boardId])
+  const detail = await app.call('own_read_board', { boardId: nested.boardId })
+  assert.deepEqual(detail.path.map(board => board.id), [root.boardId, child.boardId, nested.boardId])
+  const listed = await app.call('own_list_boards', { parentBoardId: root.boardId })
+  assert.deepEqual(listed.boards.map(board => board.id), [child.boardId])
+  assert.equal((await app.call('own_capabilities', { feature: 'canvas' })).help.example.tool, 'own_create_board')
+  const second = await app.connect()
+  const retry = (await second.callTool({ name: 'own_create_board', arguments: args })).structuredContent
+  assert.equal(retry.boardId, child.boardId)
+  assert.equal(retry.duplicate, true)
+  assert.equal((await app.notebook()).boards.length, 3)
+  for (const invalid of [{ ...args, title: '不同内容' }, { requestId: 'bad-parent', title: '不能创建', parentBoardId: 'missing' }]) {
+    const before = await app.notebook()
+    assert.equal((await app.client.callTool({ name: 'own_create_board', arguments: invalid })).isError, true)
+    assert.deepEqual(await app.notebook(), before)
+  }
+  const bytes = new Uint8Array([0, 1, 2, 255])
+  assert.equal((await app.request('/api/assets/shared-nested', { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: bytes })).status, 200)
+  for (const boardId of [root.boardId, nested.boardId]) await app.call('own_add_attachment', { boardId, requestId: 'file-' + boardId, kind: 'file', title: '共享附件', filename: 'data.bin', assetId: 'shared-nested' })
+  const stored = await app.notebook()
+  assert.deepEqual(stored.boards.flatMap(board => board.notes.filter(note => note.assetId).map(note => note.assetId)), ['shared-nested', 'shared-nested'])
+  const response = await app.request('/api/notebook')
+  stored.boards[0].parentBoardId = nested.boardId
+  assert.equal((await app.request('/api/notebook', { method: 'PUT', headers: { 'Content-Type': 'application/json', 'If-Match': response.headers.get('etag') }, body: JSON.stringify(stored) })).status, 400)
+  assert.notEqual((await app.notebook()).boards[0].parentBoardId, nested.boardId)
 })

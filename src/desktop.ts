@@ -3,12 +3,34 @@ interface CloseRequest {
   requestId: string
   discardDraft: boolean
 }
-type DesktopRequest = CloseRequest | { type: 'own:asset-open-result'; requestId: string; status: string; error?: string }
+type DesktopRequest = CloseRequest | { type: 'own:asset-open-result' | 'own:presentation-result'; requestId: string; status: string; error?: string }
 
 interface NativeWebView {
   addEventListener(type: 'message', listener: (event: MessageEvent<DesktopRequest>) => void): void
   removeEventListener(type: 'message', listener: (event: MessageEvent<DesktopRequest>) => void): void
-  postMessage(value: { type: string; requestId: string; status?: string; assetId?: string; filename?: string }): void
+  postMessage(value: { type: string; requestId: string; status?: string; assetId?: string; filename?: string; enabled?: boolean }): void
+}
+
+export async function setPresentationFullscreen(enabled: boolean): Promise<void> {
+  const bridge = window.ownDesktop && window.chrome?.webview
+  if (!bridge) {
+    if (enabled && !document.fullscreenElement) await document.documentElement.requestFullscreen()
+    else if (!enabled && document.fullscreenElement) await document.exitFullscreen()
+    return
+  }
+  const requestId = crypto.randomUUID()
+  return new Promise((resolve, reject) => {
+    const cleanup = () => { clearTimeout(timer); bridge.removeEventListener('message', listener) }
+    const listener = (event: MessageEvent<DesktopRequest>) => {
+      if (event.data?.type !== 'own:presentation-result' || event.data.requestId !== requestId) return
+      cleanup()
+      if (event.data.status === 'ok') resolve()
+      else reject(new Error(event.data.error || '无法切换全屏。'))
+    }
+    const timer = setTimeout(() => { cleanup(); reject(new Error('客户端未响应全屏请求，请升级 Own 后重试。')) }, 5000)
+    bridge.addEventListener('message', listener)
+    bridge.postMessage({ type: 'own:presentation', requestId, enabled })
+  })
 }
 
 export function openNativeAsset(assetId: string, filename: string): Promise<void> {

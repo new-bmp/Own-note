@@ -26,6 +26,7 @@ import { registerAttachmentTools } from './attachments.mjs'
 import { projectBrief, projectRevision, checkProjectAction, publicNote } from './project-policy.mjs'
 import { chartFromGrid } from '../shared/chart-grid.js'
 import { parseDataset } from '../shared/data-analysis.js'
+import { boardTrail } from '../shared/canvas-tree.js'
 import {
   captureContent,
   conversationNotes,
@@ -147,7 +148,7 @@ export function createOwnMcpServer({
   lab, jobs, assets,
 }) {
   const server = new McpServer(
-    { name: 'own-notes', version: '1.4.0', title: 'Own 笔记' },
+    { name: 'own-notes', version: '1.5.0', title: 'Own 笔记' },
     { instructions: ownGuide, maxToolInputElements: 12000 },
   )
   const boardUrl = (boardId, noteId) =>
@@ -160,6 +161,8 @@ export function createOwnMcpServer({
     updatedAt: board.updatedAt,
     sessionCount: board.captures?.length || 0,
     boardUrl: boardUrl(board.id),
+    parentBoardId: board.parentBoardId || null,
+    sharedStorage: true,
   })
   const registered=[]
   const tool = (name, title, description, inputSchema, annotations, handler) => {
@@ -244,21 +247,50 @@ export function createOwnMcpServer({
     })
   }
 
+  tool('own_create_board', '创建画布或子画布',
+    '创建空白画布；传 parentBoardId 时同时在上级添加子画布入口。所有层级共用同一工作空间和附件存储。向返回的 boardId 追加内容即可，无需复制文件。requestId 重试不重复创建。演讲中的临时布局不通过 MCP 保存。',
+    { requestId: id, title: z.string().trim().min(1).max(200), description: z.string().max(4000).default(''), parentBoardId: id.optional(), x: z.number().finite().min(-100000).max(100000).optional(), y: z.number().finite().min(-100000).max(100000).optional() },
+    appendOnly, async args => mutateWorkspace(notebook => {
+      notebook ??= newNotebook()
+      const fingerprint = contentHash(args)
+      let board = notebook.boards.find(board => board.creationRequest?.requestId === args.requestId)
+      if (board) {
+        if (board.creationRequest.fingerprint !== fingerprint) throw new Error('requestId 已用于不同画布，请为新内容换一个 ID。')
+        if (board.trashed) throw new Error('此前创建的画布已在回收站，请由用户恢复。')
+        return { notebook, unchanged: true, result: { ...describeBoard(board), boardId: board.id, duplicate: true } }
+      }
+      const parent = args.parentBoardId ? notebook.boards.find(board => board.id === args.parentBoardId && !board.trashed) : undefined
+      if (args.parentBoardId && !parent) throw new Error('上级画布不存在，请 own_list_boards 查找有效画布。Agent 独立项目不能作为上级画布。')
+      board = { id: randomUUID(), title: args.title, description: args.description, icon: 'project', favorite: false, updatedAt: Date.now(), notes: [], connections: [], creationRequest: { requestId: args.requestId, fingerprint }, ...(parent ? { parentBoardId: parent.id } : {}) }
+      notebook.boards.push(board)
+      if (!notebook.activeBoardId) notebook.activeBoardId = board.id
+      let portal
+      if (parent) {
+        portal = makeCard('board', args.title, { childBoardId: board.id, width: 400, height: 300 })
+        placeCards(parent, [portal])
+        if (args.x !== undefined) portal.x = args.x
+        if (args.y !== undefined) portal.y = args.y
+      }
+      return { notebook, result: { ...describeBoard(board), boardId: board.id, portalNoteId: portal?.id || null, duplicate: false, nextStep: { tool: 'own_add_note', arguments: { boardId: board.id } } } }
+    }))
+
   tool(
     'own_list_boards',
     '查找 Own 画布',
     '列出可用画布及摘要，不返回笔记正文。先用它确定用户指定的项目。',
     {
       query: z.string().max(200).optional(),
+      parentBoardId: id.optional().describe('仅列出这个画布的直接子画布；省略时列出全部层级。'),
       offset: z.number().int().min(0).default(0),
       limit: z.number().int().min(1).max(50).default(30),
     },
     readOnly,
-    async ({ query, offset, limit }) => {
+    async ({ query, parentBoardId, offset, limit }) => {
       const { notebook } = await readWorkspace()
       const boards = (notebook?.boards || []).filter(
         (board) =>
           !board.trashed &&
+          (!parentBoardId || board.parentBoardId === parentBoardId) &&
           (!query ||
             `${board.title} ${board.description}`
               .toLowerCase()
@@ -325,6 +357,8 @@ export function createOwnMcpServer({
         board = getBoard(notebook, boardId)
       return {
         ...describeBoard(board),
+        path: boardTrail(notebook.boards, board.id).map(describeBoard),
+        childBoards: notebook.boards.filter(child => child.parentBoardId === board.id && !child.trashed).map(describeBoard),
         notes: board.notes
           .slice(offset, offset + limit)
           .map((note) => ({ ...publicNote(note), contentHash: contentHash(note) })),
@@ -715,7 +749,7 @@ export function createOwnMcpServer({
   registerWorkbenchTools({tool,lab,jobs,assets,readWorkspace,getBoard,append,makeCard,receipt,mutateWorkspace,readOnly,appendOnly})
   registerAttachmentTools({tool,assets,readWorkspace,mutateWorkspace,getBoard,append,makeCard,receipt,readOnly,appendOnly,boardUrl})
   tool('own_read_note','完整读取一张笔记','读取单张笔记、代码单元、数据源码、媒体/模型设置或工作记录；返回 contentHash 用于条件更新。任务执行凭证不会通过读取工具暴露。',{...target,noteId:id},readOnly,async args=>{const {notebook}=await readWorkspace(),board=getBoard(notebook,args.boardId),note=board.notes.find(n=>n.id===args.noteId);if(!note)throw new Error('笔记不存在。');return {boardId:board.id,projectId:notebook.agentProjects?.some(p=>p.id===board.id)?board.id:undefined,note:publicNote(note),contentHash:contentHash(note),url:boardUrl(board.id,note.id)}})
-  tool('own_capabilities','发现所有功能与调用范例','连接后先调用，按任务发现工具、运行环境、支持格式、输入示例和长期工作协议。保存不会自动执行，运行/调试须显式调用。',{feature:z.enum(['all','agent','code','analysis','attachments','connections','authoring']).default('all')},readOnly,async args=>({version:'1.4.0',help:args.feature==='all'?featureHelp:featureHelp[args.feature],tools:registered.filter(t=>args.feature==='all'||({agent:/agent|plan/,code:/code|debug|lab/,analysis:/analy|chart/,attachments:/asset|attachment|media/,connections:/connect/,authoring:/note|latex|diagram|chart|conversation/}[args.feature]).test(t.name)),runtime:args.feature==='all'||args.feature==='code'?await jobs.runtimes():undefined,formats:{code:'JS/TS/Python/SQLite/C/C++/Java/Go/Rust execution; JS/TS/Python/C/C++ debugging; HTML/CSS/JSON/Markdown editing',data:['csv','tsv','json','xlsx via UI import'],charts:['bar','line','pie'],models:['glb','gltf','obj','stl','ply','fbx','3mf'],attachments:'任意格式完整保存，folder.entries 保留目录和模型配套文件；媒体通过 FFmpeg 转兼容格式'},workflow:'长期工作先 own_read_agent_project → own_agent_next → 每30秒 own_agent_report → own_agent_checkpoint → 附证据 done。每次领取都返回最新项目约束。项目暂停/任务变更会拒绝旧执行，且停止 Own 内绑定的运行。',examples:{project:{tool:'own_create_agent_project',arguments:{requestId:'new-project-001',title:'数据报告',goal:'分析来源数据并写清结论',scope:'仅处理指定资料',constraints:'保留原始数据；禁止凭空补值',acceptance:'图表可复现，附验证记录'}},chart:{tool:'own_add_chart',arguments:{projectId:'实际项目ID',requestId:'chart-001',title:'示例销量',grid:[['月份','销量'],['一月',3],['二月',5]],caption:'示例数据'}},run:{tool:'own_run_code',arguments:{projectId:'实际项目ID',requestId:'run-001',noteId:'代码笔记ID',cellId:'读取到的单元ID',expectedHash:'own_read_note返回的contentHash',execution:{taskId:'已领取任务ID',agentId:'当前AgentID',leaseToken:'own_agent_next返回的token',revision:'own_agent_next返回的revision'}}}},guide:'own://guide',limitation:'文字范围约束需协作 Agent 遵守；Own 不能强制停止其他客户端的外部操作，不读取隐藏推理。'}))
+  tool('own_capabilities','发现所有功能与调用范例','连接后先调用，按任务发现工具、运行环境、支持格式、输入示例和长期工作协议。保存不会自动执行，运行/调试须显式调用。',{feature:z.enum(['all','canvas','agent','code','analysis','attachments','connections','authoring']).default('all')},readOnly,async args=>({version:'1.5.0',help:args.feature==='all'?featureHelp:featureHelp[args.feature],tools:registered.filter(t=>args.feature==='all'||({canvas:/board/,agent:/agent|plan/,code:/code|debug|lab/,analysis:/analy|chart/,attachments:/asset|attachment|media/,connections:/connect/,authoring:/note|latex|diagram|chart|conversation/}[args.feature]).test(t.name)),runtime:args.feature==='all'||args.feature==='code'?await jobs.runtimes():undefined,formats:{code:'JS/TS/Python/SQLite/C/C++/Java/Go/Rust execution; JS/TS/Python/C/C++ debugging; HTML/CSS/JSON/Markdown editing',data:['csv','tsv','json','xlsx via UI import'],charts:['bar','line','pie'],models:['glb','gltf','obj','stl','ply','fbx','3mf'],attachments:'任意格式完整保存，folder.entries 保留目录和模型配套文件；媒体通过 FFmpeg 转兼容格式'},workflow:'长期工作先 own_read_agent_project → own_agent_next → 每30秒 own_agent_report → own_agent_checkpoint → 附证据 done。每次领取都返回最新项目约束。项目暂停/任务变更会拒绝旧执行，且停止 Own 内绑定的运行。',examples:{project:{tool:'own_create_agent_project',arguments:{requestId:'new-project-001',title:'数据报告',goal:'分析来源数据并写清结论',scope:'仅处理指定资料',constraints:'保留原始数据；禁止凭空补值',acceptance:'图表可复现，附验证记录'}},chart:{tool:'own_add_chart',arguments:{projectId:'实际项目ID',requestId:'chart-001',title:'示例销量',grid:[['月份','销量'],['一月',3],['二月',5]],caption:'示例数据'}},run:{tool:'own_run_code',arguments:{projectId:'实际项目ID',requestId:'run-001',noteId:'代码笔记ID',cellId:'读取到的单元ID',expectedHash:'own_read_note返回的contentHash',execution:{taskId:'已领取任务ID',agentId:'当前AgentID',leaseToken:'own_agent_next返回的token',revision:'own_agent_next返回的revision'}}}},guide:'own://guide',limitation:'文字范围约束需协作 Agent 遵守；Own 不能强制停止其他客户端的外部操作，不读取隐藏推理。'}))
 
   server.registerResource(
     'own-guide',
@@ -778,7 +812,7 @@ export function createOwnMcpServer({
     {title:'恢复长期 Agent 工作',description:'先读取用户最新目标、约束、公开方案与工作记录，再领取任务；按心跳和检查点协议执行。',argsSchema:{projectId:z.string(),agentId:z.string()}},
     async ({projectId,agentId})=>({messages:[{role:'user',content:{type:'text',text:`${ownGuide}\n恢复已授权项目，参数：${JSON.stringify({projectId,agentId})}。先 own_read_agent_project，分页读取任务和相关方案/工作记录。确认目标、范围、约束、验收后再 own_agent_next。每30秒与关键动作前上报；长期工作保存 own_agent_checkpoint，完成附实际证据。项目暂停或 needsReplan 时停止旧执行。`}}]}),
   )
-  server.registerResource('own-capabilities','own://capabilities',{title:'Own 功能与工具目录',mimeType:'application/json'},async uri=>({contents:[{uri:uri.href,mimeType:'application/json',text:JSON.stringify({version:'1.4.0',tools:registered,guide:'own://guide',runtimeTool:'own_capabilities'})}]}))
+  server.registerResource('own-capabilities','own://capabilities',{title:'Own 功能与工具目录',mimeType:'application/json'},async uri=>({contents:[{uri:uri.href,mimeType:'application/json',text:JSON.stringify({version:'1.5.0',tools:registered,guide:'own://guide',runtimeTool:'own_capabilities'})}]}))
   server.registerResource('own-agent-projects','own://agent-projects',{title:'长期 Agent 项目目录',mimeType:'application/json'},async uri=>{const {notebook}=await readWorkspace();return {contents:[{uri:uri.href,mimeType:'application/json',text:JSON.stringify((notebook?.agentProjects||[]).filter(p=>!p.trashed).map(p=>({...describeBoard(p),projectId:p.id,paused:projectBrief(p).paused})))}]}})
   server.registerResource('own-agent-project',new ResourceTemplate('own://agent-projects/{projectId}',{list:undefined}),{title:'长期 Agent 项目的目标与恢复入口',mimeType:'application/json'},async(uri,{projectId})=>{const {notebook}=await readWorkspace(),project=getBoard(notebook,projectId);if(!notebook.agentProjects?.some(p=>p.id===project.id))throw new Error('需要独立 Agent 项目。');return {contents:[{uri:uri.href,mimeType:'application/json',text:JSON.stringify({projectId:project.id,title:project.title,brief:projectBrief(project),projectRevision:projectRevision(project),taskCount:project.notes.filter(n=>n.kind==='concept').length,nextStep:{tool:'own_read_agent_project',arguments:{projectId:project.id}}})}]}})
   server.registerPrompt(

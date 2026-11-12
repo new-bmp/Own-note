@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { onDesktopClose } from './desktop'
+import { createPortal } from 'react-dom'
+import { onDesktopClose, setPresentationFullscreen } from './desktop'
+import { Presentation } from './Presentation'
+import { CanvasPortal } from './CanvasPortal'
+import { createPresentationSession } from './presentation-state'
+import type { PresentationSession } from './presentation-state'
+import { boardSubtree, boardTrail, copyBoardTree, orderedBoards } from '../shared/canvas-tree.js'
 import type {
   CSSProperties,
   FormEvent,
@@ -145,6 +151,7 @@ type Interaction =
     }
 
 const kindNames: Record<NoteKind, string> = {
+  board: '子画布',
   text: '文字卡片',
   sticky: '便签',
   image: '图片',
@@ -162,6 +169,7 @@ const kindNames: Record<NoteKind, string> = {
   concept: 'Agent 构想',
 }
 const kindIcons = {
+  board: LayoutGrid,
   markdown: FileText,
   latex: Sigma,
   diagram: GitBranch,
@@ -315,6 +323,10 @@ export default function App({
   const [tool, setTool] = useState<Tool>('select')
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>('canvas')
   const [focusMode, setFocusMode] = useState(false)
+  const [presentation, setPresentation] = useState<PresentationSession | null>(null)
+  const presentationRef = useRef(presentation)
+  presentationRef.current = presentation
+  const presentationStarting = useRef(false)
   const [snapToGrid, setSnapToGrid] = useState(false)
   const [boardTemplate, setBoardTemplate] = useState<BoardTemplate>('blank')
   const [captureKind, setCaptureKind] = useState<'note' | 'task'>('note')
@@ -394,6 +406,7 @@ export default function App({
       : (notebook.appearance ?? defaultAppearance)
   const refreshGuard = useRef(false)
   refreshGuard.current = !!(
+    presentation ||
     modal ||
     richEditing ||
     reading ||
@@ -402,6 +415,22 @@ export default function App({
     linkEditing ||
     interacting || importing
   )
+
+  async function startPresentation() {
+    if (presentationStarting.current || presentationRef.current) return
+    if (pendingImport.current || importing) { notify('请等待文件导入完成后再演讲。'); return }
+    presentationStarting.current = true
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+    setEditingId(null); setMenu(null); setContextMenu(null); setSpaceDown(false)
+    interaction.current = null; setInteracting(false)
+    try {
+      await setPresentationFullscreen(true)
+      setPresentation(createPresentationSession(notebookRef.current, activeBoard.id))
+    } catch (error) {
+      notify(error instanceof Error ? error.message : '无法进入全屏，请重试。')
+      void setPresentationFullscreen(false).catch(() => {})
+    } finally { presentationStarting.current = false }
+  }
 
   function openAppearance() {
     setAppearanceDraft({
@@ -590,6 +619,7 @@ export default function App({
     if (!element) return
     let previousWidth = 0
     const observer = new ResizeObserver((entries) => {
+      if (presentationRef.current) return
       const { width, height } = entries[0].contentRect
       setStageSize({ width, height })
       if (width < 580 && Math.abs(width - previousWidth) > 20) {
@@ -678,7 +708,7 @@ export default function App({
       refreshBusy.current ||
       pendingImport.current ||
       (!force &&
-        (modal ||
+        (presentationRef.current || modal ||
           richEditing ||
           reading ||
           editingId ||
@@ -810,8 +840,12 @@ export default function App({
       x: (stageSize.width / 2 - current.x) / current.zoom - 155,
       y: (stageSize.height / 2 - current.y) / current.zoom - 85,
     }
-    const note = { ...makeNote(kind, center.x, center.y), ...overrides }
-    updateBoard((b) => ({ ...b, notes: [...b.notes, note] }))
+    const child = kind === 'board' ? { ...makeBoard('子画布', 'blank'), parentBoardId: activeBoard.id } : undefined
+    const note = { ...makeNote(kind, center.x, center.y), ...overrides, ...(child ? { childBoardId: child.id } : {}) }
+    if (child) {
+      const current = notebookRef.current
+      apply({ ...current, boards: [...current.boards.map(board => board.id === activeBoard.id ? { ...board, notes: [...board.notes, note], updatedAt: Date.now() } : board), child] })
+    } else updateBoard((b) => ({ ...b, notes: [...b.notes, note] }))
     setWorkspaceView('canvas')
     setSelectedId(note.id)
     setSelectedEdge(null)
@@ -823,6 +857,7 @@ export default function App({
   }
 
   function selectBoard(id: string) {
+    if (!notebookRef.current.boards.some(board => board.id === id && !board.trashed)) { notify('子画布已在回收站，可恢复后查看。'); return }
     if (id !== activeBoard.id || notebookRef.current.appMode==='agents') {
       apply(
         {
@@ -1153,6 +1188,7 @@ export default function App({
 
   useEffect(() => {
     const paste = (event: ClipboardEvent) => {
+      if (presentationRef.current) return
       const target = event.target as HTMLElement
       if (target.closest('input, textarea, [contenteditable="true"]') || modal || reading || richEditing || preview || linkEditing)
         return
@@ -1192,6 +1228,7 @@ export default function App({
 
   useEffect(() => {
     const down = (event: KeyboardEvent) => {
+      if (presentationRef.current) return
       const isInput = (event.target as HTMLElement).closest(
         'input, textarea, [contenteditable="true"]',
       )
@@ -1390,13 +1427,8 @@ export default function App({
     try {
       await restoreRecoveryAssets(recovery)
       const migrated=migrateAgentProjects(recovery)
-      const boards = migrated.boards
-        .filter((board) => !board.trashed)
-        .map((board) => ({
-          ...board,
-          id: uid(),
-          title: `${board.title}（恢复副本）`,
-        }))
+      const boards = copyBoardTree(migrated.boards.filter(board => !board.trashed), uid)
+        .map(board => ({ ...board, title: `${board.title}（恢复副本）` }))
       if (!boards.length) return
       const projects=(migrated.agentProjects||[]).filter(project=>!project.trashed).map(restoreAgentActivity).map(project=>({...project,id:'agent-'+uid(),legacyBoardId:undefined,title:project.title+'（恢复副本）'}))
       apply({
@@ -1418,10 +1450,12 @@ export default function App({
 
   function exportMarkdown() {
     const exportedBoard=appMode==='agents'&&agentProject?agentProject:activeBoard
-    const text = [
+    const exportBoards = appMode === 'agents' ? [exportedBoard] : boardSubtree(notebook.boards, exportedBoard.id).filter(board => !board.trashed)
+    const text = exportBoards.map(exportedBoard => [
       `# ${exportedBoard.title}`,
       exportedBoard.description,
       ...exportedBoard.notes.map((note) => {
+        if (note.kind === 'board') return `## 子画布：${notebook.boards.find(board => board.id === note.childBoardId)?.title || note.title}\n\n内容见后续画布章节。`
         if (note.kind === 'code') return `## ${note.title}\n\n${note.body||''}\n\n${(note.cells||[]).map((cell,i)=>`### 单元 ${i+1}\n\n\`\`\`${cell.language}\n${cell.code}\n\`\`\`\n\n输入：\n\`\`\`text\n${cell.stdin}\n\`\`\`\n\n预期：\n\`\`\`text\n${cell.expected||''}\n\`\`\`\n\n实际输出：\n\`\`\`text\n${cell.output||''}\n${cell.error||''}\n\`\`\``).join('\n\n')}`
         if (note.kind === 'analysis') return `## ${note.title}\n\n\`\`\`${note.analysisFormat||'csv'}\n${note.analysisSource||''}\n\`\`\``
         if (note.kind === 'concept') return `## ${note.title}\n\n状态：${note.concept?.status}\n\n${note.body||''}\n\n### 验收标准\n${note.concept?.acceptance||''}\n\n### 最新进展\n${note.concept?.progress||''}\n\n### 产物与验证\n${note.concept?.evidence||''}`
@@ -1441,7 +1475,7 @@ export default function App({
           return `## ${note.title || note.filename}\n\n（${kindNames[note.kind]}，附件请使用完整备份导出）`
         return `## ${note.title ?? ''}\n\n${note.body ?? ''}`
       }),
-    ].join('\n\n')
+    ].join('\n\n')).join('\n\n---\n\n')
     downloadFile(
       new Blob([text], { type: 'text/markdown;charset=utf-8' }),
       `${exportedBoard.title}.md`,
@@ -1470,14 +1504,8 @@ export default function App({
         await putAsset(newId, await fetch(dataUrl).then((r) => r.blob()))
         newIds.set(id, newId)
       }
-      const boards = imported.boards
-        .filter((b) => !b.trashed)
-        .map(restoreAgentActivity)
-        .map((board) => ({
-          ...board,
-          id: uid(),
-          notes: board.notes.map((note) => remapNoteAssets(note, newIds)),
-        }))
+      const boards = copyBoardTree(imported.boards.filter(board => !board.trashed).map(restoreAgentActivity), uid)
+        .map(board => ({ ...board, notes: board.notes.map(note => remapNoteAssets(note, newIds)) }))
       if (!boards.length) throw new Error('Empty backup')
       const restoredProjects=(imported.agentProjects||[]).filter(p=>!p.trashed).map(restoreAgentActivity).map(project=>({...project,id:'agent-'+uid(),legacyBoardId:undefined,notes:project.notes.map(note=>remapNoteAssets(note,newIds))}))
       apply({
@@ -1636,8 +1664,9 @@ export default function App({
 
   function trashBoard() {
     const current = notebookRef.current
+    const removed = new Set(boardSubtree(current.boards, activeBoard.id).map(board => board.id))
     const boards = current.boards.map((b) =>
-      b.id === activeBoard.id ? { ...b, trashed: true } : b,
+      removed.has(b.id) ? { ...b, trashed: true } : b,
     )
     let next = boards.find((b) => !b.trashed)
     if (!next) {
@@ -1647,7 +1676,7 @@ export default function App({
     apply({ ...current, boards, activeBoardId: next.id })
     setSelectedId(null)
     setMenu(null)
-    notify('画布已移到回收站，可以随时找回来。')
+    notify('画布及其子画布已移到回收站，可以恢复。')
   }
 
   function editable(
@@ -1689,6 +1718,7 @@ export default function App({
   }
 
   function renderNote(note: CanvasNote) {
+    if (note.kind === 'board') return <CanvasPortal board={notebook.boards.find(board => board.id === note.childBoardId)} onOpen={() => selectBoard(note.childBoardId!)} />
     if (isWorkbenchNote(note)) return <WorkbenchCard note={note} onOpen={()=>setRichEditing(note)}/>
     if (isRichNote(note))
       return <RichCard note={note} onEdit={() => setRichEditing(note)}
@@ -2027,7 +2057,7 @@ export default function App({
 
   const boards = notebook.boards.filter((b) => !b.trashed)
   const visibleBoards = [
-    ...boards.filter((b) => filter !== 'favorites' || b.favorite),
+    ...orderedBoards(boards.filter((b) => filter !== 'favorites' || b.favorite)),
   ].sort((a, b) =>
     filter === 'recent'
       ? (b.lastOpenedAt ?? b.updatedAt) - (a.lastOpenedAt ?? a.updatedAt)
@@ -2065,7 +2095,10 @@ export default function App({
   }
 
   return (
+    <>
     <div
+      inert={!!presentation}
+      aria-hidden={!!presentation || undefined}
       className={`app-shell work-mode ${focusMode ? 'focus-mode' : ''}`}
       style={themeVariables(appearance) as CSSProperties}
       onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) event.preventDefault() }}
@@ -2187,6 +2220,8 @@ export default function App({
                 key={board.id}
                 className={`board-item ${activeBoard.id === board.id ? 'board-active' : ''}`}
                 onClick={() => selectBoard(board.id)}
+                style={{ paddingLeft: 12 + Math.min(6, boardTrail(boards, board.id).length - 1) * 14 }}
+                title={boardTrail(notebook.boards, board.id).map(board => board.title).join(' / ')}
               >
                 <span className={`board-emoji board-emoji-${board.icon}`}>
                   <Icon size={17} strokeWidth={1.7} />
@@ -2389,6 +2424,7 @@ export default function App({
 
         {appMode==='agents'?<AgentStudio key={agentProject?.id||'empty'} project={agentProject} onNew={createAgentProject} onUpdate={patch=>updateAgentProject(p=>({...p,...patch}))} onCreate={createAgentTask} onOpen={openAgentNote} onConnect={()=>setModal('agent')}/>:<><section className="project-header" aria-label="项目信息">
           <div className="board-heading" data-canvas-ui>
+            {activeBoard.parentBoardId && <nav className="canvas-breadcrumb" aria-label="画布路径">{boardTrail(notebook.boards, activeBoard.id).map((board, i) => <span key={board.id}>{i > 0 && <ChevronRight size={12} />}{board.id === activeBoard.id ? board.title : <button disabled={!!board.trashed} onClick={() => selectBoard(board.id)}>{board.title}</button>}</span>)}</nav>}
             <div className="board-heading-title">
               <h1
                 onDoubleClick={() => {
@@ -2453,6 +2489,7 @@ export default function App({
             <p>{activeBoard.description}</p>
           </div>
           <div className="canvas-top-right" data-canvas-ui>
+            <button className="quick-capture-button" onClick={() => void startPresentation()} title="全屏展示，临时布局不会保存"><Expand size={15} /><span>演讲模式</span></button>
             <button
               className="quick-capture-button"
               aria-label="快速记录 (Ctrl+Enter)"
@@ -2478,6 +2515,7 @@ export default function App({
                   <div className="dropdown-heading">添加到当前画布</div>
                   {(
                     [
+                      'board',
                       'text',
                       'sticky',
                       'checklist',
@@ -2783,6 +2821,7 @@ export default function App({
                         (event.target as HTMLElement).closest('button,a')
                       )
                         return
+                      if (note.kind === 'board') { selectBoard(note.childBoardId!); return }
                       if (isRichNote(note) || isWorkbenchNote(note)) {
                         setSelectedId(note.id)
                         setRichEditing(note)
@@ -2817,7 +2856,8 @@ export default function App({
                         <IconButton
                           label="编辑卡片（也可双击文字）"
                           onClick={() => {
-                            if (isRichNote(note) || isWorkbenchNote(note)) {
+                            if (note.kind === 'board') { selectBoard(note.childBoardId!); return }
+                      if (isRichNote(note) || isWorkbenchNote(note)) {
                               setRichEditing(note)
                               return
                             }
@@ -3643,7 +3683,7 @@ export default function App({
                             apply({
                               ...current,
                               boards: current.boards.map((b) =>
-                                b.id === board.id
+                                [...boardTrail(current.boards, board.id), ...boardSubtree(current.boards, board.id)].some(restored => restored.id === b.id)
                                   ? { ...b, trashed: false }
                                   : b,
                               ),
@@ -3831,5 +3871,7 @@ export default function App({
         </div>
       )}
     </div>
+    {presentation && createPortal(<Presentation initial={presentation} appearance={appearance} onClose={() => { setPresentation(null); requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('[title="全屏展示，临时布局不会保存"]')?.focus()) }} />, document.body)}
+    </>
   )
 }

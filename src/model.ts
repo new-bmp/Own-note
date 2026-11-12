@@ -2,6 +2,7 @@ import { diagramSource, diagramTemplates } from '../shared/diagram-builder.js'
 import { migrateAgentProjects } from '../shared/agent-workspace.js'
 
 export type NoteKind =
+  | 'board'
   | 'text'
   | 'sticky'
   | 'image'
@@ -108,6 +109,7 @@ export interface AnalysisSettings {
 }
 
 export interface CanvasNote {
+  childBoardId?: string
   id: string
   kind: NoteKind
   x: number
@@ -157,6 +159,8 @@ export interface Connection {
   toSide?: 'top' | 'right' | 'bottom' | 'left'
 }
 export interface Board {
+  parentBoardId?: string
+  creationRequest?: { requestId: string; fingerprint: string }
   executionReceipts?: { requestId: string; kind: 'code' | 'debug' | 'media'; fingerprint: string; at: number }[]
   id: string
   title: string
@@ -206,6 +210,8 @@ export const uid = () => crypto.randomUUID()
 export function makeNote(kind: NoteKind, x: number, y: number): CanvasNote {
   const base = { id: uid(), kind, x, y }
   switch (kind) {
+    case 'board':
+      return { ...base, width: 400, height: 300, title: '子画布', body: '双击进入，共用工作空间存储。' }
     case 'code':
       return { ...base, width: 560, height: 420, title: '代码实验笔记', body: '修改代码与输入，运行并比较输出。', cells: [{ id: uid(), language: 'javascript', code: 'const input = await new Promise(resolve => { let text = ""; process.stdin.on("data", chunk => text += chunk); process.stdin.on("end", () => resolve(text)); });\nconst numbers = input.trim().split(/\\s+/).map(Number);\nconsole.log(numbers.reduce((sum, value) => sum + value, 0));', stdin: '3 5 8', expected: '16\n' }] }
     case 'analysis':

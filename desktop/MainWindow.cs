@@ -19,6 +19,9 @@ internal sealed class MainWindow : Form
     private TaskCompletionSource<JsonElement>? closeReply;
     private string? closeRequestId;
     private bool ready, closing, allowClose;
+    private bool presenting;
+    private Rectangle presentationBounds;
+    private FormWindowState presentationWindowState;
 
     public MainWindow(DesktopOptions options, string instanceId)
     {
@@ -85,6 +88,7 @@ internal sealed class MainWindow : Form
             webView.ZoomFactor = 1;
             await core.AddScriptToExecuteOnDocumentCreatedAsync("Object.defineProperty(window, 'ownDesktop', {value: Object.freeze({platform:'windows', version:1}), writable:false});");
             core.NavigationStarting += (_, args) => {
+                if (IsWorkspaceUri(args.Uri)) SetPresentation(false);
                 if (args.Uri == "about:blank" || IsWorkspaceUri(args.Uri)) return;
                 args.Cancel = true;
                 if (args.IsUserInitiated) OpenExternal(args.Uri);
@@ -103,7 +107,7 @@ internal sealed class MainWindow : Form
                 if (args.IsSuccess) { loading.Visible = false; webView.Focus(); }
                 else { loading.Text = "工作空间未能打开。请从「视图」重新加载，或重新启动 Own。"; loading.Visible = true; }
             };
-            core.ProcessFailed += (_, _) => { ready = false; loading.Text = "显示进程已停止，请重新启动 Own。笔记仍保存在本机。"; loading.Visible = true; };
+            core.ProcessFailed += (_, _) => { SetPresentation(false); ready = false; loading.Text = "显示进程已停止，请重新启动 Own。笔记仍保存在本机。"; loading.Visible = true; };
             core.Navigate(backend.BaseUri!.AbsoluteUri);
         }
         catch (WebView2RuntimeNotFoundException)
@@ -159,6 +163,12 @@ internal sealed class MainWindow : Form
             using var message = JsonDocument.Parse(args.WebMessageAsJson);
             var root = message.RootElement;
             if (root.GetProperty("type").GetString() == "own:frontend-ready") { ready = true; return; }
+            if (root.GetProperty("type").GetString() == "own:presentation")
+            {
+                SetPresentation(root.GetProperty("enabled").GetBoolean());
+                webView.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new { type = "own:presentation-result", requestId = root.GetProperty("requestId").GetString(), status = "ok" }));
+                return;
+            }
             if (root.GetProperty("type").GetString() == "own:open-asset")
             {
                 await OpenAssetAsync(root.Clone());
@@ -170,6 +180,32 @@ internal sealed class MainWindow : Form
         }
         catch (JsonException) { }
         catch (KeyNotFoundException) { }
+    }
+
+    private void SetPresentation(bool enabled)
+    {
+        if (presenting == enabled) return;
+        if (enabled)
+        {
+            presentationWindowState = WindowState;
+            presentationBounds = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+            var screen = Screen.FromControl(this);
+            presenting = true;
+            WindowState = FormWindowState.Normal;
+            FormBorderStyle = FormBorderStyle.None;
+            if (MainMenuStrip is not null) MainMenuStrip.Visible = false;
+            Bounds = screen.Bounds;
+        }
+        else
+        {
+            presenting = false;
+            FormBorderStyle = FormBorderStyle.Sizable;
+            if (MainMenuStrip is not null) MainMenuStrip.Visible = true;
+            WindowState = FormWindowState.Normal;
+            Bounds = presentationBounds;
+            WindowState = presentationWindowState;
+        }
+        webView.Focus();
     }
 
     private async Task OpenAssetAsync(JsonElement request)
@@ -292,8 +328,9 @@ internal sealed class MainWindow : Form
         try
         {
             Directory.CreateDirectory(options.StateDir);
-            var bounds = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
-            File.WriteAllText(Path.Combine(options.StateDir, "window.json"), JsonSerializer.Serialize(new WindowSettings(bounds.X, bounds.Y, bounds.Width, bounds.Height, WindowState == FormWindowState.Maximized)));
+            var bounds = presenting ? presentationBounds : WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+            var maximized = (presenting ? presentationWindowState : WindowState) == FormWindowState.Maximized;
+            File.WriteAllText(Path.Combine(options.StateDir, "window.json"), JsonSerializer.Serialize(new WindowSettings(bounds.X, bounds.Y, bounds.Width, bounds.Height, maximized)));
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }

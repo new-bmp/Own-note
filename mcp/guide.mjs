@@ -25,6 +25,7 @@ own_save_conversation({
 
 ## 工具
 - own_list_boards：列出可用画布和摘要，默认不返回正文。
+- own_create_board：创建空白画布；指定 parentBoardId 创建子画布及上级入口，共用工作空间与附件，不复制文件。用返回 boardId 向子画布添加内容；own_read_board 返回 path 和 childBoards，own_list_boards 可按 parentBoardId 查直接下级。入口删除不删除下级内容。演讲是客户端只读模式，临时拖动不保存，也不能通过 MCP 改动临时演讲布局。
 - own_search：按关键词找笔记，返回片段及定位链接。
 - own_read_board：读取一个画布，支持分页；卡片附 contentHash 供精确更新。
 - own_read_conversation：按阅读顺序读回同一份会话，核对数量、原稿一致性与后续修改，支持分页和读取原稿。
@@ -60,6 +61,7 @@ Own 在内部代码、调试和媒体执行中强制验证 execution（taskId、
 `
 
 export const toolCatalog = [
+  ['own_create_board', '创建共享存储的画布与子画布'],
   ['own_capabilities', '发现功能、运行环境与调用示例'],
   ['own_list_agent_projects', '查找独立 Agent 项目'],
   ['own_create_agent_project', '创建含目标与边界的长期项目'],

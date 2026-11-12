@@ -180,3 +180,28 @@ test('native attachment opening correlates replies, reports errors and removes p
   await assert.rejects(blocked, /另存为/)
   assert.equal(listeners.size, 0)
 })
+
+
+test('native presentation fullscreen correlates enter and exit replies and rejects a failed request', async t => {
+  const previousWindow = globalThis.window
+  t.after(() => { globalThis.window = previousWindow })
+  const { setPresentationFullscreen } = await import('../src/desktop.ts')
+  const listeners = new Set(), sent = []
+  globalThis.window = { ownDesktop: { platform: 'windows', version: 1 }, chrome: { webview: {
+    addEventListener: (_, listener) => listeners.add(listener),
+    removeEventListener: (_, listener) => listeners.delete(listener),
+    postMessage: message => sent.push(message),
+  } } }
+  const enter = setPresentationFullscreen(true)
+  assert.equal(sent[0].enabled, true)
+  for (const listener of listeners) listener({ data: { type: 'own:presentation-result', requestId: 'unrelated', status: 'ok' } })
+  assert.equal(listeners.size, 1)
+  for (const listener of listeners) listener({ data: { type: 'own:presentation-result', requestId: sent[0].requestId, status: 'ok' } })
+  await enter
+  assert.equal(listeners.size, 0)
+  const exit = setPresentationFullscreen(false)
+  assert.equal(sent[1].enabled, false)
+  for (const listener of listeners) listener({ data: { type: 'own:presentation-result', requestId: sent[1].requestId, status: 'error', error: 'window failed' } })
+  await assert.rejects(exit, /window failed/)
+  assert.equal(listeners.size, 0)
+})

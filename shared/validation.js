@@ -2,8 +2,10 @@ import { validChart } from './rich-content.js'
 import { validEntryPath } from './attachments.js'
 import { validConcept, conceptDependencyError } from './concepts.js'
 import { validAgentBrief } from './agent-brief.js'
+import { canvasHierarchyError } from './canvas-tree.js'
 
 const noteKinds = new Set([
+  'board',
   'text',
   'sticky',
   'image',
@@ -86,6 +88,8 @@ export function validNotebook(value) {
   if(!optionalString(value.activeAgentProjectId,128))return false
   const allProjects=[...value.boards,...value.agentProjects||[]]
   if(new Set(allProjects.map(board=>board?.id)).size!==allProjects.length)return false
+  if(canvasHierarchyError(value.boards))return false
+  if((value.agentProjects||[]).some(board=>board?.parentBoardId!==undefined||Array.isArray(board?.notes)&&board.notes.some(note=>note?.kind==='board')))return false
   return allProjects.every((board) => {
     if(board?.agentBrief!==undefined&&!validAgentBrief(board.agentBrief))return false
     if(board?.executionReceipts!==undefined&&(!Array.isArray(board.executionReceipts)||board.executionReceipts.length>1000||!board.executionReceipts.every(r=>r&&typeof r.requestId==='string'&&r.requestId.length>0&&r.requestId.length<=128&&['code','debug','media'].includes(r.kind)&&typeof r.fingerprint==='string'&&/^[a-f0-9]{64}$/.test(r.fingerprint)&&Number.isFinite(r.at))))return false
