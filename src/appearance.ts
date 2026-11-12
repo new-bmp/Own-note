@@ -62,7 +62,27 @@ function luminance(color: string) {
 }
 
 export function textOnColor(color: string) {
-  return luminance(color) > 0.179 ? '#202938' : '#ffffff'
+  const preferred = contrastRatio('#202938', color) > contrastRatio('#ffffff', color)
+    ? '#202938'
+    : '#ffffff'
+  return readableColor(preferred, color)
+}
+
+export function contrastRatio(first: string, second: string) {
+  const values = [luminance(first), luminance(second)].sort((a, b) => b - a)
+  return (values[0] + 0.05) / (values[1] + 0.05)
+}
+
+export function readableColor(preferred: string, background: string, minimum = 4.5) {
+  if (contrastRatio(preferred, background) >= minimum) return preferred
+  const target = contrastRatio('#000000', background) > contrastRatio('#ffffff', background)
+    ? '#000000'
+    : '#ffffff'
+  for (let step = 1; step <= 100; step++) {
+    const color = mixColor(preferred, target, step / 100)
+    if (contrastRatio(color, background) >= minimum) return color
+  }
+  return target
 }
 
 export function themeVariables(appearance: Appearance) {
@@ -72,34 +92,36 @@ export function themeVariables(appearance: Appearance) {
   const canvas = validHex(appearance.canvas)
     ? appearance.canvas
     : defaultAppearance.canvas
-  let ink = accent
-  while (1.05 / (luminance(ink) + 0.05) < 4.5)
-    ink = mixColor(ink, '#17202c', 0.12)
+  const soft = mixColor(accent, '#ffffff', 0.92)
+  const ink = readableColor(accent, soft)
   const hover = mixColor(accent, '#17202c', 0.1)
   return {
     '--accent': accent,
     '--accent-ink': ink,
-    '--accent-soft': mixColor(accent, '#ffffff', 0.92),
+    '--accent-soft': soft,
     '--accent-line': mixColor(accent, '#ffffff', 0.67),
     '--accent-on': textOnColor(accent),
     '--accent-hover': hover,
     '--accent-hover-on': textOnColor(hover),
     '--canvas-color': canvas,
     '--canvas-dot': mixColor(canvas, textOnColor(canvas), 0.16),
-    '--canvas-ink': textOnColor(canvas) === '#ffffff' ? '#cad4e2' : '#738097',
+    '--canvas-ink': readableColor(textOnColor(canvas) === '#ffffff' ? '#cad4e2' : '#5b687c', canvas),
     '--green': ink,
     '--green-dark': ink,
   }
 }
 
-export function cardVariables(color: string) {
+export function cardVariables(color: string, accent = defaultAppearance.accent) {
   const background = validHex(color) ? color : '#ffffff'
-  const ink = textOnColor(background) === '#ffffff' ? '#f5f7fc' : '#303b4d'
+  const ink = readableColor(textOnColor(background) === '#ffffff' ? '#f5f7fc' : '#303b4d', background)
+  const preferredField = mixColor(background, ink, 0.045)
+  const field = contrastRatio(ink, preferredField) >= 4.5 ? preferredField : background
   return {
     '--note-color': background,
     '--note-ink': ink,
-    '--note-muted': mixColor(ink, background, 0.22),
+    '--note-muted': readableColor(mixColor(ink, background, 0.22), field),
+    '--note-link': readableColor(validHex(accent) ? accent : defaultAppearance.accent, field),
     '--note-divider': mixColor(background, ink, 0.12),
-    '--note-field': mixColor(background, ink, 0.045),
+    '--note-field': field,
   }
 }

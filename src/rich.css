@@ -10,7 +10,7 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  color: var(--note-muted, #8a94a5);
+  color: var(--note-muted, #636b77);
   font-size: 11px;
   letter-spacing: 0.2px;
 }
@@ -24,7 +24,7 @@
   display: flex;
   padding: 3px;
   color: inherit;
-  opacity: 0.7;
+  opacity: 1;
 }
 .rich-card-eyebrow > button:hover {
   opacity: 1;
@@ -55,7 +55,7 @@
   margin-top: 9px;
   padding-top: 7px;
   font-size: 11px;
-  color: var(--note-muted, #929cad);
+  color: var(--note-muted, #636a76);
 }
 .rich-card-bottom > button {
   margin-left: auto;
@@ -111,22 +111,22 @@
 }
 .reader-header > svg { color: var(--accent-ink); flex-shrink: 0; }
 .reader-header > div { flex: 1; min-width: 0; }
-.reader-header > div > span { color: #8390a3; font-size: 11px; }
+.reader-header > div > span { color: #616b79; font-size: 11px; }
 .reader-header h2 { font-size: 18px; line-height: 1.6; margin: 3px 0 0; overflow-wrap: anywhere; }
-.reader-header button { display: flex; align-items: center; justify-content: center; gap: 7px; color: #69788e; }
+.reader-header button { display: flex; align-items: center; justify-content: center; gap: 7px; color: #5d6b7e; }
 .reader-header .reader-export { border: 1px solid #e3e8f0; border-radius: 7px; padding: 8px 10px; font-size: 12px; }
 .reader-close { width: 32px; height: 32px; flex-shrink: 0; }
 .reader-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); flex: 1; min-height: 0; }
 .reader-outline { overflow: auto; border-right: 1px solid #e9edf3; background: #f9fafc; padding: 22px 12px; }
-.reader-outline > p { margin: 0 12px 17px; font-size: 11px; color: #8c98aa; }
-.reader-outline > button { display: flex; align-items: baseline; gap: 10px; width: 100%; padding: 10px 12px; text-align: left; border-radius: 6px; font-size: 12px; line-height: 1.65; color: #6e7a8d; }
-.reader-outline > button > span:first-child { font-size: 10px; color: #a4adbb; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.reader-outline > p { margin: 0 12px 17px; font-size: 11px; color: #626a77; }
+.reader-outline > button { display: flex; align-items: baseline; gap: 10px; width: 100%; padding: 10px 12px; text-align: left; border-radius: 6px; font-size: 12px; line-height: 1.65; color: #616b7c; }
+.reader-outline > button > span:first-child { font-size: 10px; color: #646a72; flex-shrink: 0; font-variant-numeric: tabular-nums; }
 .reader-outline > button > span:last-child { overflow-wrap: anywhere; }
 .reader-outline > button[aria-current], .reader-outline > button:hover { color: var(--accent-ink); background: var(--accent-soft, #eef1fb); }
 .reader-content { overflow: auto; position: relative; padding: 8px clamp(24px, 5vw, 70px) 30px; overscroll-behavior: contain; user-select: text; }
 .reader-section { padding: 30px 0; border-bottom: 1px solid #e9edf3; }
 .reader-section > h2 { margin: 8px 0 18px; font-size: 22px; line-height: 1.55; color: #34435b; overflow-wrap: anywhere; }
-.reader-section-label { display: flex; align-items: center; gap: 10px; font-size: 10px; color: #8d99ac; margin-bottom: 15px; }
+.reader-section-label { display: flex; align-items: center; gap: 10px; font-size: 10px; color: #636b78; margin-bottom: 15px; }
 .reader-section-label > span { letter-spacing: 0.4px; }
 .reader-section .rich-markdown { font-size: 15px; line-height: 1.95; }
 .reader-section .rich-markdown :is(h1, h2) { font-size: 22px; margin: 22px 0 14px; }
@@ -142,11 +142,11 @@
 .reader-tasks input { width: 16px; height: 16px; margin-top: 6px; flex-shrink: 0; accent-color: var(--accent-ink); }
 .reader-tasks > li > div { min-width: 0; }
 .reader-tasks span, .reader-plain { white-space: pre-wrap; overflow-wrap: anywhere; }
-.reader-tasks small { display: block; font-size: 12px; color: #8b97a8; margin-top: 4px; }
-.reader-task-done { color: #95a0af; text-decoration: line-through; }
+.reader-tasks small { display: block; font-size: 12px; color: #636b77; margin-top: 4px; }
+.reader-task-done { color: #646b75; text-decoration: line-through; }
 .reader-plain { line-height: 1.9; font-size: 15px; }
-.reader-notice { background: #fff8e8; padding: 12px 15px; border-radius: 7px; color: #8c744a; font-size: 12px; line-height: 1.8; }
-.reader-end { text-align: center; font-size: 11px; color: #a0aaba; margin: 28px 0 0; }
+.reader-notice { background: #fff8e8; padding: 12px 15px; border-radius: 7px; color: #7d6742; font-size: 12px; line-height: 1.8; }
+.reader-end { text-align: center; font-size: 11px; color: #636973; margin: 28px 0 0; }
 @media (max-width: 760px) {
   .conversation-reader { height: 96vh; }
   .reader-header { padding: 14px; gap: 9px; }
@@ -166,7 +166,7 @@
   display: flex;
   align-items: center;
   gap: 5px;
-  color: var(--note-muted, #8c97a8);
+  color: var(--note-muted, #636b77);
   font-size: 11px;
   min-width: 0;
 }
@@ -240,7 +240,7 @@
   margin: 10px 0;
   border-left: 3px solid var(--accent-line);
   padding: 3px 12px;
-  color: var(--note-muted, #8590a3);
+  color: var(--note-muted, #626b79);
 }
 .rich-markdown table,
 .chart-data-table table {
@@ -280,7 +280,7 @@
 .rich-caption {
   font-size: 13px;
   line-height: 1.8;
-  color: var(--note-muted, #8792a5);
+  color: var(--note-muted, #636b78);
   white-space: pre-wrap;
   margin: 12px 0 4px;
   overflow-wrap: anywhere;
@@ -299,7 +299,7 @@
   display: grid;
   min-height: 100px;
   place-items: center;
-  color: #8b97aa;
+  color: #616a77;
   font-size: 12px;
 }
 .rich-error {
@@ -344,7 +344,7 @@
 .chart-data-toggle {
   font-size: 12px;
   color: inherit;
-  opacity: 0.72;
+  opacity: 1;
   margin: 9px 0 0;
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -364,7 +364,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   flex-shrink: 0;
-  color: var(--note-muted, #8390a5);
+  color: var(--note-muted, #616b7a);
 }
 .task-owner {
   margin-left: 5px;
@@ -429,7 +429,7 @@
 .agent-connection > p {
   font-size: 12px;
   line-height: 1.9;
-  color: #8b97a9;
+  color: #636b78;
   margin: 8px 0;
 }
 .agent-endpoint {
@@ -450,7 +450,7 @@
 }
 .agent-endpoint small {
   font-size: 9px;
-  color: #8e99a9;
+  color: #636b76;
 }
 .agent-endpoint code {
   font:
@@ -460,7 +460,7 @@
 }
 .agent-online {
   font-size: 9px;
-  color: #4d8b6a;
+  color: #407358;
   background: #edf7f0;
   border-radius: 4px;
   padding: 5px 7px;
@@ -468,7 +468,7 @@
 }
 .agent-steps {
   padding-left: 18px;
-  color: #758298;
+  color: #606b7d;
   font-size: 11px;
   line-height: 1.9;
   margin: 15px 0 20px;
@@ -486,7 +486,7 @@
   font-size: 10px;
   padding: 6px 14px;
   border-radius: 5px;
-  color: #8591a5;
+  color: #626b7a;
   background: #f5f7fa;
 }
 .agent-config-tabs button.active {
@@ -502,7 +502,7 @@
 .agent-config pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  color: #65758c;
+  color: #5c6a7f;
   font:
     11px/1.8 Consolas,
     monospace;
@@ -531,7 +531,7 @@
   border-top: 1px solid #e8ecf2;
   border-bottom: 1px solid #e8ecf2;
   margin: 18px 0;
-  color: #8792a5;
+  color: #636b78;
   font-size: 11px;
   padding: 12px 0;
 }
@@ -547,7 +547,7 @@
   font-size: 10px;
 }
 .agent-tools code {
-  color: #64748c;
+  color: #5c6b81;
 }
 .agent-footer {
   display: flex;
@@ -559,7 +559,7 @@
   align-items: center;
   gap: 5px;
   font-size: 10px;
-  color: #8995a8;
+  color: #616a77;
 }
 .agent-task-prompt {
   border: 1px solid #e3e8f1;
@@ -568,7 +568,7 @@
   padding: 12px 15px;
   margin: 14px 0 20px;
 }
-.agent-task-prompt p { font-size: 12px; line-height: 1.9; margin: 0 0 8px; color: #69788f; }
+.agent-task-prompt p { font-size: 12px; line-height: 1.9; margin: 0 0 8px; color: #5d6b7f; }
 .agent-task-prompt button { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--accent-ink); padding: 3px 0; }
 .work-mode .rich-editor {
   width: 960px;
@@ -591,11 +591,11 @@
 }
 .rich-editor-header > button {
   display: flex;
-  color: #8894a7;
+  color: #626b78;
 }
 .rich-editor label {
   font-size: 12px;
-  color: #65758d;
+  color: #5c6a80;
   display: flex;
   flex-direction: column;
   gap: 7px;
@@ -612,7 +612,7 @@
 .rich-editor .rich-editor-hint {
   font-size: 12px;
   line-height: 1.8;
-  color: #65758d;
+  color: #5c6a80;
   margin: 12px 0;
 }
 .rich-editor-columns {
@@ -648,7 +648,7 @@
   gap: 7px;
 }
 .rich-live-preview > span {
-  color: #65758d;
+  color: #5c6a80;
   font-size: 12px;
 }
 .rich-live-preview > div {
@@ -676,7 +676,7 @@
   margin-top: 18px;
 }
 .conflict-refresh {
-  color: #ab633a;
+  color: #9a5934;
   background: #fff6e8;
   border: 1px solid #f1dcb9;
   padding: 6px 9px;

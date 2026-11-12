@@ -2682,6 +2682,7 @@ export default function App({
                         ...cardVariables(
                           note.color ??
                             (note.kind === 'sticky' ? '#fff5d9' : '#ffffff'),
+                          appearance.accent,
                         ),
                         zIndex: selectedId === note.id ? 5 : 2,
                       } as CSSProperties

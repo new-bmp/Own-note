@@ -8,13 +8,13 @@
   --accent-hover-on: #ffffff;
   --canvas-color: #f6f7fa;
   --canvas-dot: #d6dce6;
-  --canvas-ink: #738097;
+  --canvas-ink: #5b687c;
 }
 .boot-screen {
   height: 100dvh;
   display: grid;
   place-items: center;
-  color: #758198;
+  color: #606a7d;
   background: #f6f7fa;
   font:
     14px system-ui,
@@ -131,6 +131,11 @@
   color: var(--canvas-ink);
   background: var(--canvas-color);
 }
+.work-mode .canvas-tip kbd {
+  color: inherit;
+  background: none;
+  border-color: currentColor;
+}
 .work-mode :is(.canvas-note.note-selected, .canvas-note.connect-source) {
   outline-color: var(--accent);
 }
@@ -186,7 +191,7 @@
   border-color: var(--accent-ink);
 }
 .work-mode .appearance-button {
-  color: #76829a;
+  color: #60697d;
   flex-shrink: 0;
 }
 .work-mode .appearance-button:hover {
@@ -221,6 +226,8 @@
     td,
     .file-meta,
     .file-footer,
+    .link-site,
+    .link-bottom,
     .link-description,
     .link-url,
     .photo-label
@@ -235,7 +242,7 @@
     .table-heading > span
   ) {
   color: var(--note-muted);
-  opacity: 0.65;
+  opacity: 1;
 }
 .work-mode
   .note-tinted
@@ -248,7 +255,16 @@
 }
 .work-mode .note-tinted .checked > span {
   color: var(--note-muted);
-  opacity: 0.55;
+  opacity: 1;
+}
+.work-mode .note-tinted :is(.folder-card-title small, .folder-card-entries > div, .folder-card-entries p) {
+  color: var(--note-muted);
+}
+.work-mode .note-tinted :is(.folder-card-title, .folder-open-button, .read-note-button, .rich-markdown a, .subtle-button, .table-add-row, .file-download, .link-top > a) {
+  color: var(--note-link);
+}
+.work-mode :is(input, textarea)::placeholder {
+  opacity: 1;
 }
 .work-mode .note-tinted [contenteditable='true'] {
   background: var(--note-field);
@@ -266,7 +282,7 @@
   margin-bottom: 17px;
 }
 .work-mode .modal-appearance .eyebrow {
-  color: #929dad;
+  color: #636b76;
   font-size: 8px;
   letter-spacing: 1.8px;
 }
@@ -276,7 +292,7 @@
   margin-top: 9px;
 }
 .work-mode .modal-appearance p {
-  color: #8591a4;
+  color: #626b79;
   font-size: 11px;
   margin-bottom: 23px;
 }
@@ -298,7 +314,7 @@
 }
 .appearance-section-title > span {
   font-size: 10px;
-  color: #96a0b0;
+  color: #636a74;
 }
 .accent-presets,
 .canvas-presets {
@@ -312,7 +328,7 @@
   flex-direction: column;
   align-items: center;
   gap: 9px;
-  color: #8590a3;
+  color: #626b79;
   border-radius: 6px;
   padding: 6px 2px 7px;
 }
@@ -356,7 +372,7 @@
   margin-top: 17px;
 }
 .appearance-custom-row > span {
-  color: #8b95a6;
+  color: #636a76;
   font-size: 10px;
 }
 .custom-color-field {
@@ -401,7 +417,7 @@
   pointer-events: none;
 }
 .native-color-picker > svg {
-  color: #9ba5b6;
+  color: #636a74;
   pointer-events: none;
 }
 .color-hex-input {
@@ -417,12 +433,12 @@
   background: #fff;
 }
 .color-hex-input[aria-invalid='true'] {
-  color: #c56d64;
+  color: #9c564f;
 }
 .appearance-hint {
   padding: 11px 12px;
   border-radius: 5px;
-  color: #8390a6;
+  color: #616b7b;
   font-size: 10px;
   line-height: 1.7;
   background: #f6f8fb;
@@ -439,7 +455,7 @@
   align-items: center;
   gap: 6px;
   margin-right: auto;
-  color: #8b96aa;
+  color: #616977;
   font-size: 10px;
 }
 .appearance-reset:hover {
@@ -450,7 +466,7 @@
   font-size: 11px;
 }
 .work-mode .appearance-actions .secondary-button {
-  color: #7d8ba2;
+  color: #606b7d;
   border-color: #e3e7ef;
 }
 .card-color-control {
@@ -519,7 +535,7 @@
 .card-color-actions > button {
   font-size: 10px;
   padding: 7px 6px;
-  color: #8994a6;
+  color: #636b78;
   border-radius: 4px;
 }
 .card-color-actions .apply-card-color {
