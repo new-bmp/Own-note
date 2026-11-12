@@ -8,6 +8,7 @@ import './theme.css'
 import 'katex/dist/katex.min.css'
 import './rich.css'
 import './authoring.css'
+import './workbench.css'
 
 const root = ReactDOM.createRoot(document.getElementById('root')!)
 void loadNotebook().then((notebook) =>

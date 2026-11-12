@@ -92,6 +92,12 @@ url = "http://127.0.0.1:5173/mcp"
 | `own_add_diagram`       | 校验并追加 Mermaid 图及说明                            |
 | `own_add_chart`         | 追加柱状图、折线图或饼图及原始数据                     |
 | `own_update_note`       | 用 `expectedHash` 更新一张卡片，冲突时拒绝覆盖         |
+| `own_add_code`          | 保存多语言代码单元、标准输入与预期输出，手动运行       |
+| `own_add_analysis`      | 校验并完整保存 CSV / TSV / JSON 数据分析笔记           |
+| `own_publish_plan`      | 发布公开方案、任务要求、验收标准和依赖                 |
+| `own_agent_next`        | 发送心跳并领取最新待实现笔记及版本凭证                 |
+| `own_agent_report`      | 报告进度、阻塞、完成证据，检测用户修改                 |
+| `own_agent_status`      | 读取实际上报的 Agent 状态与构想笔记                   |
 
 另有 `own://guide` 整理指南、`own://boards` 画布目录、`own://boards/{boardId}` 画布元信息资源，以及 `organize_conversation` 提示模板。工具的完整输入结构可通过 MCP `tools/list` 发现。
 
@@ -120,7 +126,29 @@ Mermaid 支持流程图、时序图、类图、状态图、ER 图、思维导图
 
 本机 HTTP 只监听 loopback，校验 Host / Origin，无跨站 CORS。MCP 请求最大 4 MB，笔记工作空间最大 20 MB。保存文件仍为 `data/notebook.json`，附件路径不变。
 
-保存成功后，服务通过 SSE 立即通知页面读取最新版本，支持 agent 连续分段更新内容；每 3 秒的版本检查仍作为断线兜底。页面空闲且本地更改已保存时，收到更新后采用最新内容并清空旧撤销历史，防止撤销抹掉新卡片。编辑期间暂缓接收。若修改期间远端已更新，页面保存会被拒绝，点击「接收更新」可加载最新版，未保存内容保留在工作空间恢复副本中。服务端卡片更新同样要求预先读取并传入最新 `contentHash`。
+保存成功后，服务通过 SSE 立即通知页面读取最新版本，每 3 秒的版本检查作为断线兜底。页面空闲时采用最新内容并清空旧撤销历史，编辑期间暂缓替换。保存遇到远端更新时，以编辑前版本进行三方合并：独立笔记或字段的更改和 Agent 心跳可合并；同一字段的不同修改会拒绝覆盖。点击「接收更新」可加载最新版，未保存内容保留在恢复副本中。`own_update_note` 仍要求最新 `contentHash`；构想任务要求由用户编辑，Agent 使用 `own_agent_report` 写入进展和结果。
+
+## Next to do 协议
+
+`own_publish_plan` 接受 `boardId`、`requestId`、`agentId`、`agentName?`、`title`、完整 `markdown` 和 `tasks`。每项任务包含临时 `id`、`title`、`markdown`、`acceptance`、`dependsOn`。依赖用该批任务的临时 ID，服务转为持久笔记 ID。最多 100 个任务；重复或不存在的依赖和循环依赖会使整次发布失败。
+
+```json
+{
+  "boardId": "从 own_list_boards 获取",
+  "requestId": "plan-001",
+  "agentId": "my-agent",
+  "title": "实现学习示例",
+  "markdown": "## 方案\n先保存源码、输入与要求，再验证真实输出。",
+  "tasks": [
+    { "id": "build", "title": "创建示例", "markdown": "保留所有输入。", "acceptance": "输入 3、5、8，输出 16。", "dependsOn": [] },
+    { "id": "test", "title": "验证示例", "markdown": "读回并检查输出。", "acceptance": "给出实际结果。", "dependsOn": ["build"] }
+  ]
+}
+```
+
+然后调用 `own_agent_next({boardId, agentId})`。`status: running` 返回当前 `note`、`leaseToken`、`revision`；只执行这个版本。至少每 30 秒以及关键动作前后调用 `own_agent_report({boardId, agentId, noteId, leaseToken, revision, status, progress, evidence?})`。完成需 `status: done` 和真实 `evidence`；阻塞时用 `blocked`。修改、暂停、删除、依赖重新打开或 120 秒凭证过期后，旧报告返回 `needsReplan: true`，必须重新领取。没有任务时返回 `waiting`，工具不会替客户端安排自动继续。
+
+状态以实际上报为准，75 秒内心跳显示在线。任务公开展示方案、要求、进展、证据及修改记录，不要求或输出隐藏推理。仅配置 MCP 不会暴露客户端内部 todo。详细行为见 [工作台说明](workbench.md)。
 
 ## 验证
 

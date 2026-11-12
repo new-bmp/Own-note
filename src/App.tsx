@@ -61,6 +61,7 @@ import {
   Sigma,
   GitBranch,
   ChartColumn,
+  Code2,
   Undo2,
   Upload,
   X,
@@ -85,9 +86,12 @@ import type { ImportGroup } from './file-import'
 import { importAssets } from './import-assets'
 import type { ImportProgress } from './import-assets'
 import { assetIdsForNote, remapNoteAssets } from '../shared/attachments.js'
+import { restoreAgentActivity } from '../shared/concepts.js'
+import { mergeWorkspaces } from '../shared/workspace-merge.js'
 import { connectionGeometry, connectionSides, nearestSide } from '../shared/connections.js'
 import type { ConnectionSide } from '../shared/connections.js'
 import { ConnectionPanel } from './ConnectionPanel'
+import { WorkbenchCard, WorkbenchEditor, AgentWorkboard, isWorkbenchNote } from './Workbench'
 import type { TaskDraft, WorkspaceView } from './WorkViews'
 import type {
   Board,
@@ -151,12 +155,18 @@ const kindNames: Record<NoteKind, string> = {
   latex: 'LaTeX 公式',
   diagram: 'Mermaid 图',
   chart: '数据图表',
+  code: '多语言代码笔记',
+  analysis: '数据分析',
+  concept: 'Agent 构想',
 }
 const kindIcons = {
   markdown: FileText,
   latex: Sigma,
   diagram: GitBranch,
   chart: ChartColumn,
+  code: Code2,
+  analysis: ChartColumn,
+  concept: Bot,
   text: Type,
   sticky: StickyNote,
   image: ImagePlus,
@@ -445,7 +455,8 @@ export default function App({
   async function saveNow() {
     setSaving(true)
     try {
-      await writeNotebook(notebookRef.current)
+      const submitted=notebookRef.current
+      adoptSavedMerge(submitted,await writeNotebook(submitted))
       setSaving(false)
       setSaveError(false)
       setWorkspaceConflict(false)
@@ -473,6 +484,12 @@ export default function App({
     }
     notebookRef.current = next
     setNotebook(next)
+  }
+
+  function adoptSavedMerge(submitted:Notebook,saved:Notebook) {
+    if(JSON.stringify(submitted)===JSON.stringify(saved))return
+    const next=mergeWorkspaces(submitted,notebookRef.current,saved)
+    apply(next,false)
   }
 
   function updateBoard(edit: (board: Board) => Board, remember = true) {
@@ -591,7 +608,8 @@ export default function App({
     let active = true
     const timeout = setTimeout(() => {
       writeNotebook(notebook)
-        .then(() => {
+        .then((saved) => {
+          adoptSavedMerge(notebook,saved)
           if (active) {
             setSaving(false)
             setSaveError(false)
@@ -771,7 +789,7 @@ export default function App({
     setTool('select')
     setMenu(null)
     setContextMenu(null)
-    if (isRichNote(note)) setRichEditing(note)
+    if (isRichNote(note) || isWorkbenchNote(note)) setRichEditing(note)
     return note
   }
 
@@ -818,6 +836,9 @@ export default function App({
       id: uid(),
       x: original.x + 28,
       y: original.y + 28,
+    }
+    if(copy.concept){
+      copy.concept={...copy.concept,lease:undefined,agentId:undefined,...(copy.concept.status==='running'?{status:'pending'}:{})}
     }
     updateBoard((b) => ({ ...b, notes: [...b.notes, copy] }))
     setSelectedId(copy.id)
@@ -1358,6 +1379,9 @@ export default function App({
       `# ${activeBoard.title}`,
       activeBoard.description,
       ...activeBoard.notes.map((note) => {
+        if (note.kind === 'code') return `## ${note.title}\n\n${note.body||''}\n\n${(note.cells||[]).map((cell,i)=>`### 单元 ${i+1}\n\n\`\`\`${cell.language}\n${cell.code}\n\`\`\`\n\n输入：\n\`\`\`text\n${cell.stdin}\n\`\`\`\n\n预期：\n\`\`\`text\n${cell.expected||''}\n\`\`\`\n\n实际输出：\n\`\`\`text\n${cell.output||''}\n${cell.error||''}\n\`\`\``).join('\n\n')}`
+        if (note.kind === 'analysis') return `## ${note.title}\n\n\`\`\`${note.analysisFormat||'csv'}\n${note.analysisSource||''}\n\`\`\``
+        if (note.kind === 'concept') return `## ${note.title}\n\n状态：${note.concept?.status}\n\n${note.body||''}\n\n### 验收标准\n${note.concept?.acceptance||''}\n\n### 最新进展\n${note.concept?.progress||''}\n\n### 产物与验证\n${note.concept?.evidence||''}`
         if (note.kind === 'latex')
           return `## ${note.title}\n\n$$\n${note.latex}\n$$\n\n${note.caption || ''}`
         if (note.kind === 'diagram')
@@ -1405,6 +1429,7 @@ export default function App({
       }
       const boards = imported.boards
         .filter((b) => !b.trashed)
+        .map(restoreAgentActivity)
         .map((board) => ({
           ...board,
           id: uid(),
@@ -1618,6 +1643,7 @@ export default function App({
   }
 
   function renderNote(note: CanvasNote) {
+    if (isWorkbenchNote(note)) return <WorkbenchCard note={note} onOpen={()=>setRichEditing(note)}/>
     if (isRichNote(note))
       return <RichCard note={note} onEdit={() => setRichEditing(note)}
         onRead={() => setReading({ board: activeBoard, noteId: note.id })}
@@ -2403,6 +2429,9 @@ export default function App({
                       'latex',
                       'diagram',
                       'chart',
+                      'code',
+                      'analysis',
+                      'concept',
                       'image',
                       'file',
                       'folder',
@@ -2473,6 +2502,7 @@ export default function App({
                   icon: FolderOpen,
                   count: resourceCount,
                 },
+                { id:'agents', label:'Agent 构想', icon:Bot, count:activeBoard.notes.filter(n=>n.kind==='concept'&&n.concept?.status!=='done').length },
               ] as const
             ).map(({ id, label, icon: Icon, count }) => (
               <button
@@ -2698,7 +2728,7 @@ export default function App({
                         (event.target as HTMLElement).closest('button,a')
                       )
                         return
-                      if (isRichNote(note)) {
+                      if (isRichNote(note) || isWorkbenchNote(note)) {
                         setSelectedId(note.id)
                         setRichEditing(note)
                         return
@@ -2732,7 +2762,7 @@ export default function App({
                         <IconButton
                           label="编辑卡片（也可双击文字）"
                           onClick={() => {
-                            if (isRichNote(note)) {
+                            if (isRichNote(note) || isWorkbenchNote(note)) {
                               setRichEditing(note)
                               return
                             }
@@ -3106,6 +3136,7 @@ export default function App({
               />
             </div>
           )}
+          {workspaceView === 'agents' && <div className="project-view-panel" role="tabpanel" aria-labelledby="view-tab-agents" id="project-agents"><AgentWorkboard key={activeBoard.id} board={activeBoard} onOpen={setRichEditing} onCreate={()=>{addNote('concept');setWorkspaceView('agents')}}/></div>}
         </div>
       </main>
 
@@ -3713,7 +3744,7 @@ export default function App({
 
       {reading && <ConversationReader board={reading.board} noteId={reading.noteId} onClose={() => setReading(null)} />}
 
-      {richEditing && (
+      {richEditing && !isWorkbenchNote(richEditing) && (
         <RichEditor
           key={richEditing.id}
           note={richEditing}
@@ -3725,6 +3756,7 @@ export default function App({
           }}
         />
       )}
+      {richEditing && isWorkbenchNote(richEditing) && <WorkbenchEditor key={richEditing.id} note={richEditing} board={activeBoard} onClose={()=>setRichEditing(null)} onSave={patch=>{updateNote(richEditing.id,patch);setRichEditing(null)}} onChart={fields=>{addNote('chart',undefined,fields);setRichEditing(richEditing)}}/>}
 
       {preview && <FileLibrary key={preview.id} note={preview} onClose={() => setPreview(null)} onExtract={(file) => {
         const point = canvasPoint(stageSize.width / 2 + (stageRef.current?.getBoundingClientRect().left || 0), stageSize.height / 2 + (stageRef.current?.getBoundingClientRect().top || 0))

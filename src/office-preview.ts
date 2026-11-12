@@ -1,7 +1,7 @@
 import { unzipSync, strFromU8 } from 'fflate'
 
 export interface DocumentPart { title?: string; text?: string; rows?: string[][] }
-export function readOffice(bytes: Uint8Array, extension: string): DocumentPart[] {
+export function readOffice(bytes: Uint8Array, extension: string, options: { analysis?: boolean } = {}): DocumentPart[] {
   let total = 0
   const files = unzipSync(bytes, { filter: (file) => {
     const wanted = /^(word\/document\.xml|xl\/(workbook\.xml|_rels\/workbook.xml.rels|sharedStrings\.xml|worksheets\/sheet\d+\.xml)|ppt\/slides\/slide\d+\.xml)$/.test(file.name)
@@ -37,17 +37,24 @@ export function readOffice(bytes: Uint8Array, extension: string): DocumentPart[]
     const target = relations.get(id) || ''
     const name = target.startsWith('/') ? target.slice(1) : `xl/${target.replace(/^\.\//, '')}`
     if (!/^xl\/worksheets\/sheet\d+\.xml$/.test(name)) return { title: sheet.getAttribute('name') || '工作表', text: '此工作表请使用原始文件查看。' }
-    const rows = elements(parse(name), 'row').slice(0, 1000).map((row) => {
+    const sourceRows = elements(parse(name), 'row')
+    if (options.analysis && sourceRows.length > 50001) throw new Error('Excel 超过 50000 行数据，请缩小范围后再分析。')
+    const rows = sourceRows.slice(0, options.analysis ? 50001 : 1000).map((row) => {
       const cells: string[] = []
       for (const cell of elements(row, 'c')) {
         const ref = cell.getAttribute('r')?.match(/^[A-Z]+/)?.[0] || 'A'
         const index = [...ref].reduce((value, char) => value * 26 + char.charCodeAt(0) - 64, 0) - 1
-        if (index >= 200) continue
+        if (index >= 200) {
+          if (options.analysis) throw new Error('Excel 超过 200 列，请缩小范围后再分析。')
+          continue
+        }
+        if (options.analysis && elements(cell, 'f').length && !elements(cell, 'v').length)
+          throw new Error('Excel 含有未计算的公式，请在 Excel 中计算并保存，或导出 CSV 后再导入。')
         const value = elements(cell, 'v')[0]?.textContent || ''
         cells[index] = cell.getAttribute('t') === 's' ? strings[Number(value)] || '' : cell.getAttribute('t') === 'inlineStr' ? texts(cell) : value
       }
       return Array.from({ length: cells.length }, (_, index) => cells[index] || '')
     })
-    return { title: `${sheet.getAttribute('name') || '工作表'} · 预览最多 1000 行、200 列`, rows }
+    return { title: `${sheet.getAttribute('name') || '工作表'}${options.analysis ? '' : ' · 预览最多 1000 行、200 列'}`, rows }
   })
 }

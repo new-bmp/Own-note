@@ -8,6 +8,7 @@ import { validNotebook } from './shared/validation.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { createOwnMcpServer } from './mcp/server.mjs'
 import { toolCatalog } from './mcp/guide.mjs'
+import { createJobs } from './services/jobs.mjs'
 
 const projectRoot = path.dirname(fileURLToPath(import.meta.url))
 const assetIdPattern = /^[a-zA-Z0-9_-]{1,128}$/
@@ -73,6 +74,8 @@ export async function createFieldnotesServer({
   staticDir = path.resolve(staticDir)
   const notebookFile = path.join(dataDir, 'notebook.json')
   const assetsDir = path.join(dataDir, 'assets')
+  const derivedDir = path.join(dataDir, 'derived')
+  const jobs = createJobs({ assetsDir, derivedDir })
   await mkdir(assetsDir, { recursive: true })
   let writeQueue = Promise.resolve()
   const eventClients = new Set()
@@ -228,6 +231,29 @@ export async function createFieldnotesServer({
         return
       }
       if (pathname.startsWith('/api/')) {
+        if (pathname.startsWith('/api/lab/')) {
+          try {
+            if (pathname === '/api/lab/runtimes' && request.method === 'GET') return json(response, 200, await jobs.runtimes())
+            if (['/api/lab/code', '/api/lab/convert'].includes(pathname) && request.method === 'POST') {
+              const args = JSON.parse((await body(request, 600000)).toString('utf8'))
+              return json(response, 202, jobs.start(pathname.endsWith('code') ? 'code' : 'media', args))
+            }
+            const match = pathname.match(/^\/api\/lab\/jobs\/([a-f\d-]{36})$/)
+            if (match && request.method === 'GET') return json(response, 200, jobs.get(match[1]))
+            if (match && request.method === 'DELETE') { jobs.cancel(match[1]); return json(response,200,{ok:true}) }
+            const media = pathname.match(/^\/api\/lab\/media\/([a-f\d-]{36}\.(mp3|mp4))$/)
+            if (media && ['GET','HEAD'].includes(request.method)) {
+              const target=path.join(derivedDir,media[1]), info=await stat(target)
+              const range=request.headers.range?.match(/^bytes=(\d*)-(\d*)$/)
+              const start=range?(range[1]?Number(range[1]):Math.max(0,info.size-Number(range[2]))):0, end=range&&range[1]&&range[2]?Math.min(Number(range[2]),info.size-1):info.size-1
+              if(request.headers.range&&!range||range&&!range[1]&&!Number(range[2])||!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start>end||start>=info.size){ response.writeHead(416,{'Content-Range':`bytes */${info.size}`});return response.end() }
+              response.writeHead(range?206:200,{'Content-Type':media[2]==='mp3'?'audio/mpeg':'video/mp4','Content-Length':end-start+1,'Accept-Ranges':'bytes','Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...(range?{'Content-Range':`bytes ${start}-${end}/${info.size}`}:{})})
+              if(request.method==='HEAD')return response.end()
+              return createReadStream(target,{start,end}).on('error',()=>response.destroy()).pipe(response)
+            }
+            return json(response,404,{error:'工作台接口不存在。'})
+          } catch(error){ return json(response,error.code==='ENOENT'?404:400,{error:error.message}) }
+        }
         if (pathname === '/api/events' && request.method === 'GET') {
           response.writeHead(200, {
             'Content-Type': 'text/event-stream; charset=utf-8',
@@ -396,6 +422,7 @@ export async function createFieldnotesServer({
   })
   const close = server.close.bind(server)
   server.close = (callback) => {
+    jobs.close()
     for (const response of eventClients) response.end()
     eventClients.clear()
     return close(callback)

@@ -2,6 +2,7 @@ import { initialNotebook, upgradeWorkspace } from './model'
 import type { Notebook } from './model'
 import { validNotebook } from '../shared/validation.js'
 import { assetIdsForNote } from '../shared/attachments.js'
+import { mergeWorkspaces } from '../shared/workspace-merge.js'
 export { validNotebook } from '../shared/validation.js'
 
 const STORAGE_KEY = 'fieldnotes:notebook:v1'
@@ -13,6 +14,7 @@ let serverRevision: string | null = null
 let saveQueue: Promise<void> = Promise.resolve()
 let savedSnapshot: string | null = null
 let pendingWrites = 0
+let lastSubmittedSnapshot: string | null = null
 
 export class WorkspaceConflictError extends Error {}
 
@@ -98,7 +100,7 @@ async function migrateAssets(notebook: Notebook) {
 
 export const restoreRecoveryAssets = migrateAssets
 
-async function saveToServer(notebook: Notebook, keepalive = false) {
+async function saveToServer(notebook: Notebook, keepalive = false, baseSnapshot = savedSnapshot): Promise<Notebook> {
   if (serverRevision === null) {
     const current = await fetch('/api/notebook', {
       cache: 'no-store',
@@ -121,27 +123,46 @@ async function saveToServer(notebook: Notebook, keepalive = false) {
     if (remote === null) await migrateAssets(notebook)
     serverRevision = etag
   }
-  const response = await fetch('/api/notebook', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', 'If-Match': serverRevision },
-    body: JSON.stringify(notebook),
-    keepalive,
-    signal: keepalive ? undefined : AbortSignal.timeout(15_000),
-  })
-  if (response.status === 409)
-    throw new WorkspaceConflictError(
-      '另一个窗口已保存更新，请先导出当前内容，再刷新页面。',
-    )
+  const submitted = JSON.stringify(notebook)
+  let candidate = notebook, mergeBase = savedSnapshot, revision = serverRevision
+  const conflict = () => new WorkspaceConflictError('同一内容已在另一窗口或 Agent 中修改，请先导出当前内容，再接收更新。')
+  if (baseSnapshot && savedSnapshot && baseSnapshot !== savedSnapshot) {
+    try { candidate = mergeWorkspaces(JSON.parse(lastSubmittedSnapshot || baseSnapshot), candidate, JSON.parse(savedSnapshot)) }
+    catch { throw conflict() }
+  }
+  let response: Response | undefined
+  for (let attempt = 0; attempt < 3; attempt++) {
+    response = await fetch('/api/notebook', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'If-Match': revision! },
+      body: JSON.stringify(candidate), keepalive,
+      signal: keepalive ? undefined : AbortSignal.timeout(15_000),
+    })
+    if (response.status !== 409) break
+    if (!mergeBase || attempt === 2) throw conflict()
+    const latest = await fetch('/api/notebook', { cache: 'no-store', signal: AbortSignal.timeout(8000) })
+    const { notebook: remote }: { notebook: unknown } = await latest.json()
+    if (!latest.ok || !latest.headers.get('ETag') || !validNotebook(remote)) throw conflict()
+    try { candidate = mergeWorkspaces(JSON.parse(mergeBase), candidate, remote) }
+    catch { throw conflict() }
+    if (!validNotebook(candidate)) throw conflict()
+    mergeBase = JSON.stringify(remote); revision = latest.headers.get('ETag')!
+  }
+  if (!response) throw conflict()
   if (!response.ok) throw new Error('本地服务保存失败，请重试或导出备份。')
   serverRevision = response.headers.get('ETag')
-  savedSnapshot = JSON.stringify(notebook)
+  savedSnapshot = JSON.stringify(candidate)
+  lastSubmittedSnapshot = submitted
   try {
     localStorage.setItem(REVISION_KEY, serverRevision || '')
-    if (localStorage.getItem(STORAGE_KEY) === JSON.stringify(notebook))
+    if (localStorage.getItem(STORAGE_KEY) === submitted) {
+      localStorage.setItem(STORAGE_KEY, savedSnapshot)
       localStorage.removeItem(DIRTY_KEY)
+    }
   } catch {
     /* The server already confirmed the durable save. */
   }
+  return candidate
 }
 
 export async function loadNotebook(): Promise<Notebook> {
@@ -202,17 +223,18 @@ export function readNotebook(): Notebook {
 export function writeNotebook(
   notebook: Notebook,
   keepalive = false,
-): Promise<void> {
+): Promise<Notebook> {
   if (JSON.stringify(notebook) === savedSnapshot && !pendingWrites)
-    return Promise.resolve()
+    return Promise.resolve(notebook)
   cacheNotebook(notebook)
   pendingWrites++
+  const baseSnapshot = savedSnapshot
   const pending = saveQueue
-    .then(() => saveToServer(notebook, keepalive))
+    .then(() => saveToServer(notebook, keepalive, baseSnapshot))
     .finally(() => {
       pendingWrites--
     })
-  saveQueue = pending.catch(() => {})
+  saveQueue = pending.then(() => {}).catch(() => {})
   return pending
 }
 

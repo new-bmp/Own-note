@@ -13,6 +13,9 @@ export type NoteKind =
   | 'latex'
   | 'diagram'
   | 'chart'
+  | 'code'
+  | 'analysis'
+  | 'concept'
 export type Tool =
   | 'select'
   | 'hand'
@@ -89,6 +92,18 @@ export interface FolderEntry {
   error?: string
 }
 
+export interface CodeCell { id: string; language: string; code: string; stdin: string; expected?: string; output?: string; error?: string; exitCode?: number; executedAt?: number; executedCode?: string; executedLanguage?: string; executedInput?: string; executionCount?: number }
+export interface ConceptState { planId: string; status: 'pending' | 'running' | 'done' | 'blocked' | 'paused'; acceptance: string; dependsOn: string[]; agentId?: string; progress?: string; evidence?: string; lease?: { token: string; revision: string; expiresAt: number }; history?: { at: number; text: string }[] }
+export interface AgentPresence { id: string; name: string; lastSeenAt: number; currentNoteId?: string; summary?: string }
+export interface AnalysisSettings {
+  filter?: { column: number; operator: string; value: string }
+  sort?: { column: number; ascending: boolean }
+  group?: number
+  value?: number
+  method?: string
+  chartType?: 'bar' | 'line' | 'pie'
+}
+
 export interface CanvasNote {
   id: string
   kind: NoteKind
@@ -115,6 +130,12 @@ export interface CanvasNote {
   chart?: ChartSpec
   source?: NoteSource
   entries?: FolderEntry[]
+  modelPath?: string
+  cells?: CodeCell[]
+  analysisSource?: string
+  analysisFormat?: 'csv' | 'tsv' | 'json'
+  analysisSettings?: AnalysisSettings
+  concept?: ConceptState
 }
 
 export interface Connection {
@@ -148,6 +169,7 @@ export interface Board {
   notes: CanvasNote[]
   connections: Connection[]
   captures?: ConversationCapture[]
+  agents?: AgentPresence[]
 }
 export interface Appearance {
   accent: string
@@ -172,6 +194,12 @@ export const uid = () => crypto.randomUUID()
 export function makeNote(kind: NoteKind, x: number, y: number): CanvasNote {
   const base = { id: uid(), kind, x, y }
   switch (kind) {
+    case 'code':
+      return { ...base, width: 560, height: 420, title: '代码实验笔记', body: '修改代码与输入，运行并比较输出。', cells: [{ id: uid(), language: 'javascript', code: 'const input = await new Promise(resolve => { let text = ""; process.stdin.on("data", chunk => text += chunk); process.stdin.on("end", () => resolve(text)); });\nconst numbers = input.trim().split(/\\s+/).map(Number);\nconsole.log(numbers.reduce((sum, value) => sum + value, 0));', stdin: '3 5 8', expected: '16\n' }] }
+    case 'analysis':
+      return { ...base, width: 520, height: 360, title: '数据分析', analysisFormat: 'csv', analysisSource: '日期,类别,金额\n2026-11-01,设计,120\n2026-11-02,开发,350\n2026-11-03,设计,180\n2026-11-04,开发,420' }
+    case 'concept':
+      return { ...base, width: 440, height: 380, title: '下一步构想', body: '描述目标、范围、约束，以及需要交付的结果。', concept: { planId: uid(), status: 'pending', acceptance: '列出可验证的完成标准。', dependsOn: [] } }
     case 'markdown':
       return {
         ...base,
@@ -578,6 +606,11 @@ export function noteSearchText(note: CanvasNote): string {
     note.latex,
     note.mermaid,
     note.caption,
+    note.analysisSource,
+    note.concept?.acceptance,
+    note.concept?.progress,
+    note.concept?.evidence,
+    ...(note.cells?.map(cell => `${cell.language} ${cell.code} ${cell.stdin} ${cell.output || ''}`) ?? []),
     note.source?.agent,
     ...(note.entries?.map((entry) => entry.path) ?? []),
     ...(note.items?.map((i) => `${i.text} ${i.owner || ''}`) ?? []),

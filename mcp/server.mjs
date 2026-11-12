@@ -13,6 +13,8 @@ import {
   id,
 } from './schemas.mjs'
 import { ownGuide } from './guide.mjs'
+import { registerAgentTools } from './agents.mjs'
+import { parseDataset } from '../shared/data-analysis.js'
 import {
   captureContent,
   conversationNotes,
@@ -642,6 +644,8 @@ export function createOwnMcpServer({
           index = board.notes.findIndex((note) => note.id === args.noteId)
         if (index < 0) throw new Error('卡片不存在。')
         const previous = board.notes[index]
+        if (previous.kind === 'concept')
+          throw new Error('构想任务由用户编辑。Agent 请用 own_agent_report 记录进展和证据，避免覆盖用户的执行要求。')
         if (contentHash(previous) !== args.expectedHash)
           throw new Error('卡片已被修改，请重新调用 own_read_board 后再更新。')
         if (
@@ -658,6 +662,14 @@ export function createOwnMcpServer({
       })
     },
   )
+
+  registerAgentTools({tool, readWorkspace, mutateWorkspace, getBoard, boardUrl})
+  tool('own_add_code','添加可运行代码笔记','保存学习用源码、语言、标准输入和预期输出，供用户手动运行。工具本身不执行代码。一次可含多个独立单元，输出由用户运行后保存。', {
+    ...addBase, cells: z.array(z.object({language:z.enum(['javascript','typescript','python','sql','html','css','json','cpp','c','java','go','rust','csharp','shell','markdown']),code:z.string().max(100000),stdin:z.string().max(64000).default(''),expected:z.string().max(262144).optional()}).strict()).min(1).max(40),
+  }, appendOnly, async args => append(args,makeCard('code',args.title,{width:560,height:420,body:args.caption,cells:args.cells.map(c=>({...c,id:randomUUID()}))})))
+  tool('own_add_analysis','添加可复现的数据分析笔记','校验并完整保存 CSV、TSV 或 JSON 原始数据，供用户在分析工作台筛选、统计、分组和制图。不截断数据；格式错误时不写入。重复 requestId 保留用户修改。',{
+    ...addBase,format:z.enum(['csv','tsv','json']).default('csv'),data:z.string().min(1).max(2000000),
+  },appendOnly,async args=>{parseDataset(args.data,args.format);return append(args,makeCard('analysis',args.title,{width:520,height:360,analysisSource:args.data,analysisFormat:args.format,caption:args.caption}))})
 
   server.registerResource(
     'own-guide',

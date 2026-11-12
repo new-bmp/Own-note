@@ -16,6 +16,7 @@ export function AgentConnection() {
   const [tab, setTab] = useState<'http' | 'stdio' | 'codex'>('http')
   const [copied, setCopied] = useState(false)
   const [promptCopied, setPromptCopied] = useState(false)
+  const [planCopied, setPlanCopied] = useState(false)
   useEffect(() => {
     const controller = new AbortController()
     void fetch('/api/integrations', { signal: controller.signal })
@@ -81,6 +82,8 @@ export function AgentConnection() {
         </li>
       </ol>
       <div className="agent-task-prompt">
+        <p>协作执行：先发布构想与验收标准，Agent 持续报告待办进展。修改“Agent 构想”中的未实现笔记后，Agent 下次检查会收到新版本。</p>
+        <button onClick={async()=>{try{await navigator.clipboard.writeText('请在 Own 按 Next to do 协议协作：先用 own_list_boards 找到目标项目，用 own_publish_plan 发布完整公开方案、任务、验收标准与依赖。own_agent_next 领取最新任务；执行前、关键步骤后及每 30 秒用 own_agent_report 检查用户修改并报告进展。needsReplan=true 时停止旧方案并重新读取。提交 done 时提供实际产物、测试与限制。用 own_add_code 保留代码、标准输入和预期输出，代码由用户手动运行。公开方案与结果要完整，不提交隐藏推理。');setPlanCopied(true)}catch{setError('复制未成功，请选中内容手动复制。')}}}>{planCopied?<Check size={13}/>:<Copy size={13}/>}复制 Next to do 协作要求</button>
         <p>{organizePrompt}</p>
         <button onClick={async () => {
           try {

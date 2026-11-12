@@ -17,7 +17,7 @@ import {
 import type { Board, CanvasNote, TaskItem } from './model'
 import { workDate } from './model'
 
-export type WorkspaceView = 'canvas' | 'tasks' | 'assets'
+export type WorkspaceView = 'canvas' | 'tasks' | 'assets' | 'agents'
 export type TaskDraft = Pick<TaskItem, 'text' | 'priority' | 'dueDate'>
 
 export function boardTasks(board: Board) {

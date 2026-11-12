@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { ChevronRight, Download, FileText, FolderOpen, Search, X, ArrowUp, ExternalLink, Plus } from 'lucide-react'
 import type { CanvasNote, FolderEntry } from './model'
 import { getAsset, downloadFile } from './storage'
@@ -6,11 +6,14 @@ import { RichPreview } from './RichContent'
 import { extension, inferMime, previewType, validEntryPath } from '../shared/attachments.js'
 import { openNativeAsset } from './desktop'
 import type { DocumentPart } from './office-preview'
+const MediaPlayer = lazy(()=>import('./MediaPlayer').then(m=>({default:m.MediaPlayer})))
+const ModelViewer = lazy(()=>import('./ModelViewer').then(m=>({default:m.ModelViewer})))
+const noEntries: FolderEntry[] = []
 
 const size = (value = 0) => value >= 1048576 ? `${(value / 1048576).toFixed(1)} MB` : `${(value / 1024).toFixed(1)} KB`
 export function entryNote(folder: CanvasNote, entry: FolderEntry): CanvasNote {
   return { ...folder, kind: 'file', title: entry.path.split('/').at(-1), filename: entry.path.split('/').at(-1),
-    assetId: entry.assetId, size: entry.size, mime: entry.mime, entries: undefined }
+    assetId: entry.assetId, size: entry.size, mime: entry.mime, entries: folder.entries, modelPath: entry.path }
 }
 
 function FileContent({ note }: { note: CanvasNote }) {
@@ -63,8 +66,10 @@ function FileContent({ note }: { note: CanvasNote }) {
       <div className="file-content-scroll" tabIndex={0}>
         {data.url && type === 'image' && <img className="file-preview-image" src={data.url} alt={filename} onError={() => setData((data) => ({ ...data, error: '当前环境无法预览此图片格式，请另存为或用系统应用打开。' }))} />}
         {data.url && type === 'pdf' && <iframe className="file-preview-pdf" src={data.url} title={filename} />}
-        {data.url && type === 'video' && <video className="file-preview-video" controls src={data.url} onError={() => setData((data) => ({ ...data, error: '当前环境无法播放此视频编码，请另存为或用系统应用打开。' }))} />}
-        {data.url && type === 'audio' && <audio controls src={data.url} onError={() => setData((data) => ({ ...data, error: '当前环境无法播放此音频编码，请另存为或用系统应用打开。' }))} />}
+        <Suspense fallback={<p role="status">正在加载查看器…</p>}>
+          {data.url && (type === 'video' || type === 'audio') && <MediaPlayer url={data.url} kind={type} assetId={note.assetId} filename={filename}/>}
+          {data.blob && type === 'model' && <ModelViewer blob={data.blob} filename={filename} entries={note.entries || noEntries} resourcePath={note.modelPath}/>}
+        </Suspense>
         {data.text !== undefined && (!rich || raw ? <pre className="file-text-content">{data.text}</pre> : <RichPreview note={{ ...note, kind: ext === 'tex' ? 'latex' : ['mmd', 'mermaid'].includes(ext) ? 'diagram' : 'markdown', body: data.text, latex: data.text, mermaid: data.text }} />)}
         {data.parts && <div className="office-preview"><p className="office-preview-hint">内容预览 · 原文排版、图片与图表请使用系统应用查看</p>{data.parts.map((part, index) => <section key={index}>
           {part.title && <h3>{part.title}</h3>}{part.text && <p>{part.text}</p>}

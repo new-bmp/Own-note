@@ -1,5 +1,6 @@
 import { validChart } from './rich-content.js'
 import { validEntryPath } from './attachments.js'
+import { validConcept, conceptDependencyError } from './concepts.js'
 
 const noteKinds = new Set([
   'text',
@@ -14,6 +15,7 @@ const noteKinds = new Set([
   'latex',
   'diagram',
   'chart',
+  'code', 'analysis', 'concept',
 ])
 const hexColor = /^#[\da-f]{6}$/i
 const optionalString = (value, max = 100000) =>
@@ -110,11 +112,39 @@ export function validNotebook(value) {
     )
       return false
     const noteIds = new Set(board.notes.map((note) => note?.id))
+    if (board.notes.some(note => !note || typeof note !== 'object')) return false
+    if (board.agents !== undefined && (!Array.isArray(board.agents) || board.agents.length > 100 || !board.agents.every(a => a && typeof a.id === 'string' && a.id.length <= 128 && typeof a.name === 'string' && a.name.length <= 128 && Number.isFinite(a.lastSeenAt) && optionalString(a.currentNoteId,128) && optionalString(a.summary,12000)))) return false
     return (
       noteIds.size === board.notes.length &&
       board.notes.every((note) => {
         if (!note || typeof note.id !== 'string' || !noteKinds.has(note.kind))
           return false
+        if (note.kind === 'concept' && !validConcept(note.concept)) return false
+        if (note.concept !== undefined && !validConcept(note.concept)) return false
+        if (note.kind === 'code' && (!Array.isArray(note.cells) || note.cells.length < 1)) return false
+        if (note.cells !== undefined && (
+          !Array.isArray(note.cells) || note.cells.length > 40 ||
+          new Set(note.cells.map(cell => cell?.id)).size !== note.cells.length ||
+          !note.cells.every(cell => cell &&
+            typeof cell.id === 'string' && cell.id.length > 0 && cell.id.length <= 128 &&
+            typeof cell.language === 'string' && cell.language.length <= 30 &&
+            typeof cell.code === 'string' && cell.code.length <= 100000 &&
+            typeof cell.stdin === 'string' && cell.stdin.length <= 64000 &&
+            ['expected', 'output', 'error', 'executedCode'].every(key => optionalString(cell[key], 262144)) &&
+            optionalString(cell.executedInput, 64000) && optionalString(cell.executedLanguage, 30) &&
+            ['exitCode', 'executedAt', 'executionCount'].every(key => cell[key] === undefined || Number.isFinite(cell[key])))
+        )) return false
+        if (!optionalString(note.analysisSource,2000000) || note.analysisFormat!==undefined&&!['csv','tsv','json'].includes(note.analysisFormat)) return false
+        if (note.analysisSettings !== undefined) {
+          const settings = note.analysisSettings
+          const index = value => Number.isInteger(value) && value >= -1 && value < 200
+          if (!settings || typeof settings !== 'object' ||
+            ['group', 'value'].some(key => settings[key] !== undefined && !index(settings[key])) ||
+            settings.chartType !== undefined && !['bar', 'line', 'pie'].includes(settings.chartType) ||
+            settings.method !== undefined && !['sum', 'mean', 'count'].includes(settings.method) ||
+            settings.sort !== undefined && (!settings.sort || !index(settings.sort.column) || typeof settings.sort.ascending !== 'boolean') ||
+            settings.filter !== undefined && (!settings.filter || !index(settings.filter.column) || !['contains', 'equals', 'greater', 'less'].includes(settings.filter.operator) || !optionalString(settings.filter.value, 20000))) return false
+        }
         if (note.kind === 'folder' && !Array.isArray(note.entries)) return false
         if (
           note.entries !== undefined &&
@@ -154,6 +184,7 @@ export function validNotebook(value) {
             note.latex,
             note.mermaid,
             note.caption,
+            note.modelPath,
           ].every((field) => field === undefined || typeof field === 'string')
         )
           return false
@@ -205,6 +236,7 @@ export function validNotebook(value) {
             ))
         )
       }) &&
+      !conceptDependencyError(board.notes) &&
       board.connections.every(
         (edge) =>
           edge &&

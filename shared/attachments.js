@@ -9,6 +9,9 @@ const mimeTypes = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
   bmp: 'image/bmp', avif: 'image/avif', ico: 'image/x-icon', mp3: 'audio/mpeg', wav: 'audio/wav',
   ogg: 'audio/ogg', flac: 'audio/flac', m4a: 'audio/mp4', mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
+  aac:'audio/aac',aiff:'audio/aiff',aif:'audio/aiff',wma:'audio/x-ms-wma',opus:'audio/ogg',amr:'audio/amr',ape:'audio/ape',ac3:'audio/ac3',dts:'audio/vnd.dts',mid:'audio/midi',midi:'audio/midi',
+  avi:'video/x-msvideo',mkv:'video/x-matroska',wmv:'video/x-ms-wmv',flv:'video/x-flv',mpg:'video/mpeg',mpeg:'video/mpeg',m4v:'video/mp4',mts:'video/mp2t',m2ts:'video/mp2t','3gp':'video/3gpp',vob:'video/mpeg',ogv:'video/ogg',
+  glb:'model/gltf-binary',gltf:'model/gltf+json',obj:'model/obj',stl:'model/stl',ply:'application/octet-stream',fbx:'application/octet-stream','3mf':'model/3mf',
 }
 export const extension = (name = '') => name.includes('.') ? name.split('.').at(-1).toLowerCase() : ''
 export const inferMime = (name, mime) => mime && mime !== 'application/octet-stream' ? mime : mimeTypes[extension(name)] || 'application/octet-stream'
@@ -17,6 +20,7 @@ export const validEntryPath = (value) => typeof value === 'string' && value.leng
 export function previewType(name, mime) {
   const type = inferMime(name, mime)
   const ext = extension(name)
+  if(['glb','gltf','obj','stl','ply','fbx','3mf'].includes(ext))return 'model'
   if (ext === 'svg') return 'image'
   if (type.startsWith('image/')) return 'image'
   if (type.startsWith('audio/')) return 'audio'

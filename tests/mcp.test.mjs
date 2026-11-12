@@ -9,6 +9,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { createFieldnotesServer } from '../server.mjs'
 import { initialNotebook } from '../src/model.ts'
+import { restoreAgentActivity, conceptDependencyError } from '../shared/concepts.js'
 
 async function fixture(t, empty = false) {
   const directory = await mkdtemp(path.join(tmpdir(), 'own-mcp-'))
@@ -121,7 +122,7 @@ const capture = () => ({
 test('MCP initializes over HTTP and exposes tools, resources, templates and an organizing prompt', async (t) => {
   const app = await fixture(t)
   const tools = await app.client.listTools()
-  assert.equal(tools.tools.length, 10)
+  assert.equal(tools.tools.length, 16)
   assert.ok(
     tools.tools.some(
       (tool) =>
@@ -503,6 +504,100 @@ test('browser ETags and concurrent MCP writes share one serialization queue', as
   )
 })
 
+async function editWorkspace(app, change) {
+  const response = await app.request('/api/notebook'), { notebook } = await response.json()
+  change(notebook)
+  const saved = await app.request('/api/notebook', { method: 'PUT', headers: { 'Content-Type': 'application/json', 'If-Match': response.headers.get('etag') }, body: JSON.stringify(notebook) })
+  assert.equal(saved.status, 200, await saved.text())
+}
+const plan = boardId => ({
+  boardId, requestId: 'plan-1', agentId: 'agent-a', agentName: '开发 Agent', title: '公开实现方案', markdown: '## 目标\n\n先实现，再验证。',
+  tasks: [
+    { id: 'implement', title: '实现功能', markdown: '按用户要求实现功能。', acceptance: '保留用户指定内容。', dependsOn: [] },
+    { id: 'verify', title: '验证效果', markdown: '验证输入与输出。', acceptance: '给出真实验证证据。', dependsOn: ['implement'] },
+  ],
+})
+const report = (boardId, lease, patch = {}) => ({ boardId, agentId: 'agent-a', noteId: lease.note.id, revision: lease.revision, leaseToken: lease.leaseToken, status: 'running', progress: '准备执行。', ...patch })
+
+test('Agent plan leases follow edited notes, reject stale completion and unlock dependent work only after evidence', async t => {
+  const app = await fixture(t), boardId = (await app.notebook()).boards[0].id
+  const published = await app.call('own_publish_plan', plan(boardId))
+  assert.equal(published.tasks.length, 2); assert.ok(published.overviewId)
+  const first = await app.call('own_agent_next', { boardId, agentId: 'agent-a' })
+  assert.equal(first.note.title, '实现功能'); assert.equal(first.note.concept.status, 'running')
+  const other = await app.call('own_agent_next', { boardId, agentId: 'agent-b' })
+  assert.equal(other.status, 'waiting', 'a second Agent cannot take an active task or its dependency')
+  assert.equal((await app.call('own_agent_report', report(boardId, first, { progress: '已检查输入。' }))).accepted, true)
+  await editWorkspace(app, notebook => { notebook.boards[0].notes.find(n => n.id === first.note.id).body = '新要求：必须输出中文，并保留原始数据。' })
+  const rejected = await app.call('own_agent_report', report(boardId, first, { status: 'done', evidence: '旧版本结果。' }))
+  assert.equal(rejected.accepted, false); assert.equal(rejected.needsReplan, true)
+  assert.equal(rejected.note.body, '新要求：必须输出中文，并保留原始数据。')
+  const duplicate = await app.call('own_publish_plan', plan(boardId))
+  assert.equal(duplicate.duplicate, true); assert.equal(duplicate.tasks.find(n => n.id === first.note.id).body, rejected.note.body)
+  const next = await app.call('own_agent_next', { boardId, agentId: 'agent-a' })
+  assert.notEqual(next.leaseToken, first.leaseToken); assert.notEqual(next.revision, first.revision)
+  const noEvidence = await app.client.callTool({ name: 'own_agent_report', arguments: report(boardId, next, { status: 'done' }) })
+  assert.equal(noEvidence.isError, true)
+  const done = await app.call('own_agent_report', report(boardId, next, { status: 'done', progress: '按新要求完成。', evidence: '输入 3、5、8，输出“合计 16”。原始数据读回一致。' }))
+  assert.equal(done.note.concept.status, 'done'); assert.equal(done.note.concept.lease, undefined)
+  const dependency = await app.call('own_agent_next', { boardId, agentId: 'agent-b' })
+  assert.equal(dependency.note.title, '验证效果')
+  const status = await app.call('own_agent_status', { boardId })
+  assert.equal(status.agents.find(a => a.id === 'agent-b').online, true)
+  assert.equal(status.tasks.find(n => n.id === dependency.note.id).concept.lease.token, undefined)
+  await editWorkspace(app, notebook => { notebook.boards[0].notes.find(n => n.id === first.note.id).concept.status = 'pending' })
+  const invalidatedDependency = await app.call('own_agent_report', report(boardId, dependency, { agentId: 'agent-b' }))
+  assert.equal(invalidatedDependency.needsReplan, true, 'reopening a dependency invalidates dependent execution')
+})
+
+test('Agent pause, deletion, expired ownership, dependency cycles and backup restore preserve user control', async t => {
+  const app = await fixture(t), boardId = (await app.notebook()).boards[0].id
+  const bad = plan(boardId); bad.tasks[0].dependsOn = ['verify']
+  const cycle = await app.client.callTool({ name: 'own_publish_plan', arguments: bad })
+  assert.equal(cycle.isError, true); assert.equal((await app.notebook()).boards[0].notes.some(n => n.kind === 'concept'), false)
+  await app.call('own_publish_plan', plan(boardId))
+  const first = await app.call('own_agent_next', { boardId, agentId: 'agent-a' })
+  await editWorkspace(app, notebook => { notebook.boards[0].notes.find(n => n.id === first.note.id).concept.status = 'paused' })
+  assert.equal((await app.call('own_agent_report', report(boardId, first))).needsReplan, true)
+  assert.equal((await app.call('own_agent_next', { boardId, agentId: 'agent-a' })).status, 'waiting')
+  await editWorkspace(app, notebook => { notebook.boards[0].notes.find(n => n.id === first.note.id).concept.status = 'pending' })
+  const active = await app.call('own_agent_next', { boardId, agentId: 'agent-a' })
+  const snapshot = (await app.notebook()).boards[0], restored = restoreAgentActivity(snapshot)
+  assert.equal(restored.agents.length, 0); assert.equal(restored.notes.find(n => n.id === first.note.id).concept.status, 'pending')
+  assert.equal(restored.notes.find(n => n.id === first.note.id).concept.lease, undefined)
+  assert.deepEqual(restored.notes.find(n => n.title === '验证效果').concept.dependsOn, [first.note.id])
+  await editWorkspace(app, notebook => { const b = notebook.boards[0]; b.notes.find(n => n.id === first.note.id).concept.lease.expiresAt = Date.now() - 1000; b.agents.find(a => a.id === 'agent-a').lastSeenAt = Date.now() - 80000 })
+  assert.equal((await app.call('own_agent_status', { boardId })).agents.find(a => a.id === 'agent-a').online, false)
+  const reassigned = await app.call('own_agent_next', { boardId, agentId: 'agent-b' })
+  assert.equal(reassigned.note.id, first.note.id)
+  assert.equal((await app.call('own_agent_report', report(boardId, active))).needsReplan, true)
+  const read = await app.call('own_read_board', { boardId })
+  const card = read.notes.find(n => n.id === first.note.id)
+  const overwrite = await app.client.callTool({ name: 'own_update_note', arguments: { boardId, noteId: card.id, expectedHash: card.contentHash, body: 'Agent 不应覆盖用户要求。' } })
+  assert.equal(overwrite.isError, true)
+  await editWorkspace(app, notebook => { const b = notebook.boards[0]; b.notes = b.notes.filter(n => n.id !== first.note.id); b.connections = b.connections.filter(e => e.from !== first.note.id && e.to !== first.note.id) })
+  const deleted = await app.call('own_agent_report', report(boardId, reassigned, { agentId: 'agent-b' }))
+  assert.equal(deleted.needsReplan, true); assert.equal(deleted.accepted, false)
+  assert.equal((await app.call('own_agent_next', { boardId, agentId: 'agent-b' })).status, 'waiting')
+  assert.match(conceptDependencyError([{ id: 'a', kind: 'concept', concept: { dependsOn: ['b'] } }, { id: 'b', kind: 'concept', concept: { dependsOn: ['a'] } }]), /循环/)
+})
+
+test('MCP saves multi-language code examples completely without executing them', async t => {
+  const app = await fixture(t), boardId = (await app.notebook()).boards[0].id
+  const args = { boardId, requestId: 'code-examples', title: '输入输出学习', cells: [{ language: 'javascript', code: 'throw new Error("must not execute on import");', stdin: '中文\n3 5 8', expected: '16\n' }, { language: 'python', code: 'print(input())', stdin: 'Own', expected: 'Own\n' }] }
+  const added = await app.call('own_add_code', args)
+  assert.equal((await app.call('own_add_code', args)).duplicate, true)
+  const note = (await app.notebook()).boards[0].notes.find(n => n.id === added.noteIds[0])
+  assert.equal(note.kind, 'code'); assert.equal(note.cells.length, 2); assert.equal(note.cells[0].stdin, args.cells[0].stdin)
+  assert.equal(note.cells[0].output, undefined); assert.equal(note.cells[0].executedAt, undefined)
+  const data={boardId,requestId:'analysis-data',title:'原始实验数据',format:'csv',data:'类别,值\n甲,3\n乙,5'}
+  const analysis=await app.call('own_add_analysis',data)
+  assert.equal((await app.call('own_add_analysis',data)).duplicate,true)
+  assert.equal((await app.notebook()).boards[0].notes.find(n=>n.id===analysis.noteIds[0]).analysisSource,data.data)
+  const invalid=await app.client.callTool({name:'own_add_analysis',arguments:{...data,requestId:'invalid-data',data:'a,b\n"unclosed'}})
+  assert.equal(invalid.isError,true)
+})
+
 test('stdio bridge exposes the same tools and persists through the running HTTP server', async (t) => {
   const app = await fixture(t)
   const transport = new StdioClientTransport({
@@ -516,7 +611,7 @@ test('stdio bridge exposes the same tools and persists through the running HTTP 
     errors += data.toString()
   })
   const client = await app.connect(transport)
-  assert.equal((await client.listTools()).tools.length, 10, errors)
+  assert.equal((await client.listTools()).tools.length, 16, errors)
   const response = await client.callTool({
     name: 'own_save_conversation',
     arguments: {

@@ -76,6 +76,10 @@ test('browser adopts agent updates only while idle, preserves unsaved recovery, 
       "'../shared/attachments.js'",
       JSON.stringify(new URL('../shared/attachments.js', import.meta.url).href),
     )
+    .replaceAll(
+      "'../shared/workspace-merge.js'",
+      JSON.stringify(new URL('../shared/workspace-merge.js', import.meta.url).href),
+    )
   const output = ts.transpileModule(code, {
     compilerOptions: {
       target: ts.ScriptTarget.ES2022,
@@ -125,28 +129,45 @@ test('browser adopts agent updates only while idle, preserves unsaved recovery, 
   const draft = structuredClone(current)
   draft.boards[0].notes[0].title = '用户尚未保存的修改'
   await append('agent-two')
+  const merged = await storage.writeNotebook(draft)
+  assert.equal(merged.boards[0].notes[0].title, draft.boards[0].notes[0].title)
+  assert.ok(merged.boards[0].notes.some(note=>note.title==='agent-two'))
+  current = merged
+  const queuedFirst = structuredClone(current), queuedSecond = structuredClone(current)
+  queuedFirst.boards[0].notes[0].body = '连续输入 A'
+  queuedSecond.boards[0].notes[0].body = '连续输入 B'
+  await append('agent-during-queue')
+  const saves = await Promise.all([storage.writeNotebook(queuedFirst), storage.writeNotebook(queuedSecond)])
+  current = saves[1]
+  assert.equal(current.boards[0].notes[0].body, '连续输入 B')
+  assert.ok(current.boards[0].notes.some(note=>note.title==='agent-during-queue'))
+  const conflicting = structuredClone(current)
+  conflicting.boards[0].notes[0].title = '用户再次修改'
+  const latest = await nativeFetch(url + '/api/notebook'), remoteEdit = (await latest.json()).notebook
+  remoteEdit.boards[0].notes[0].title = '另一窗口也修改了同一标题'
+  assert.equal((await nativeFetch(url + '/api/notebook', { method:'PUT',headers:{'Content-Type':'application/json','If-Match':latest.headers.get('etag')},body:JSON.stringify(remoteEdit) })).status,200)
   await assert.rejects(
-    storage.writeNotebook(draft),
+    storage.writeNotebook(conflicting),
     storage.WorkspaceConflictError,
   )
   assert.equal(
-    await storage.refreshNotebook(draft, () => true),
+    await storage.refreshNotebook(conflicting, () => true),
     null,
     'dirty content must not be discarded by polling',
   )
-  const resolved = await storage.refreshNotebook(draft, () => true, true)
+  const resolved = await storage.refreshNotebook(conflicting, () => true, true)
   assert.ok(resolved.boards[0].notes.some((note) => note.title === 'agent-two'))
   assert.equal(
     resolved.boards[0].notes[0].title,
-    initial.boards[0].notes[0].title,
+    '另一窗口也修改了同一标题',
   )
-  assert.deepEqual(storage.readRecoveryNotebook(), draft)
+  assert.deepEqual(storage.readRecoveryNotebook(), conflicting)
   await storage.writeNotebook(resolved)
   const remote = (await (await nativeFetch(url + '/api/notebook')).json())
     .notebook
   assert.equal(
     remote.boards[0].notes[0].title,
-    initial.boards[0].notes[0].title,
+    '另一窗口也修改了同一标题',
   )
   assert.ok(remote.boards[0].notes.some((note) => note.title === 'agent-two'))
 })
