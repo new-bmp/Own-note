@@ -9,6 +9,8 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { createOwnMcpServer } from './mcp/server.mjs'
 import { toolCatalog } from './mcp/guide.mjs'
 import { createJobs } from './services/jobs.mjs'
+import { createDebugSessions } from './services/debug.mjs'
+import { migrateAgentProjects } from './shared/agent-workspace.js'
 
 const projectRoot = path.dirname(fileURLToPath(import.meta.url))
 const assetIdPattern = /^[a-zA-Z0-9_-]{1,128}$/
@@ -76,6 +78,7 @@ export async function createFieldnotesServer({
   const assetsDir = path.join(dataDir, 'assets')
   const derivedDir = path.join(dataDir, 'derived')
   const jobs = createJobs({ assetsDir, derivedDir })
+  const debugging = createDebugSessions()
   await mkdir(assetsDir, { recursive: true })
   let writeQueue = Promise.resolve()
   const eventClients = new Set()
@@ -91,7 +94,7 @@ export async function createFieldnotesServer({
       const contents = await readFile(notebookFile, 'utf8')
       const notebook = JSON.parse(contents)
       if (!validNotebook(notebook)) throw new Error('Invalid saved workspace')
-      return { notebook, etag: revision(contents) }
+      return { notebook:migrateAgentProjects(notebook), etag: revision(contents) }
     } catch (error) {
       if (error.code === 'ENOENT') return { notebook: null, etag: '"empty"' }
       throw error
@@ -233,6 +236,10 @@ export async function createFieldnotesServer({
       if (pathname.startsWith('/api/')) {
         if (pathname.startsWith('/api/lab/')) {
           try {
+            if(pathname==='/api/lab/debug'&&request.method==='POST')return json(response,202,debugging.start(JSON.parse((await body(request,600000)).toString('utf8'))))
+            const debug=pathname.match(/^\/api\/lab\/debug\/([a-f\d-]{36})$/)
+            if(debug&&request.method==='GET')return json(response,200,debugging.get(debug[1]))
+            if(debug&&request.method==='POST')return json(response,200,await debugging.command(debug[1],JSON.parse((await body(request,20000)).toString('utf8'))))
             if (pathname === '/api/lab/runtimes' && request.method === 'GET') return json(response, 200, await jobs.runtimes())
             if (['/api/lab/code', '/api/lab/convert'].includes(pathname) && request.method === 'POST') {
               const args = JSON.parse((await body(request, 600000)).toString('utf8'))
@@ -423,6 +430,7 @@ export async function createFieldnotesServer({
   const close = server.close.bind(server)
   server.close = (callback) => {
     jobs.close()
+    debugging.close()
     for (const response of eventClients) response.end()
     eventClients.clear()
     return close(callback)

@@ -58,10 +58,29 @@ Name: "chinesesimp"; MessagesFile: "ChineseSimplified.isl"
 [Tasks]
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "快捷方式："; Flags: checkedonce
 
+[Types]
+Name: "common"; Description: "常用工具（推荐）"
+Name: "full"; Description: "全部语言工具"
+Name: "custom"; Description: "自定义组件"; Flags: iscustom
+
+[Components]
+Name: "core"; Description: "Own 客户端、Node.js 与媒体工具"; Types: common full custom; Flags: fixed
+Name: "python"; Description: "Python · 运行与单步调试"; Types: common full
+Name: "cpp"; Description: "C / C++ · GCC、G++ 与 GDB 单步调试"; Types: common full
+Name: "java"; Description: "Java · OpenJDK 21（可选）"; Types: full
+Name: "go"; Description: "Go（可选）"; Types: full
+Name: "rust"; Description: "Rust · 包含 GNU 链接工具（可选）"; Types: full
+
 [Files]
 ; Only the completed production package is included. User notes live outside
 ; {app}; neither installation nor uninstallation touches that data directory.
-Source: "{#PackageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#PackageDir}\*"; DestDir: "{app}"; Excludes: "\runtime\toolchains\*"; Components: core; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#PackageDir}\runtime\toolchains\manifest.json"; DestDir: "{app}\runtime\toolchains"; Components: core; Flags: ignoreversion
+Source: "{#PackageDir}\runtime\toolchains\python\*"; DestDir: "{app}\runtime\toolchains\python"; Components: python; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#PackageDir}\runtime\toolchains\mingw\*"; DestDir: "{app}\runtime\toolchains\mingw"; Components: cpp or rust; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#PackageDir}\runtime\toolchains\java\*"; DestDir: "{app}\runtime\toolchains\java"; Components: java; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#PackageDir}\runtime\toolchains\go\*"; DestDir: "{app}\runtime\toolchains\go"; Components: go; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#PackageDir}\runtime\toolchains\rust\*"; DestDir: "{app}\runtime\toolchains\rust"; Components: rust; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#OwnName}"; Filename: "{app}\Own.exe"; WorkingDir: "{app}"; AppUserModelID: "{#OwnId}"

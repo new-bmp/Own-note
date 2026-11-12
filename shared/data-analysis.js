@@ -11,18 +11,18 @@ export function parseDataset(source, format = 'csv') {
     } else throw new Error('JSON 行类型不一致。')
   } else {
     const separator=format==='tsv'?'\t':','
-    matrix=[];let row=[],cell='',quoted=false,closed=false
+    matrix=[];let row=[],cell='',quoted=false,closed=false,explicit=false
     for(let i=0;i<source.length;i++) {
       const c=source[i]
       if(quoted){if(c==='"'){if(source[i+1]==='"'){cell+='"';i++}else{quoted=false;closed=true}}else cell+=c;continue}
-      if(c==='"'&&!cell&&!closed){quoted=true;continue}
+      if(c==='"'&&!cell&&!closed){quoted=true;explicit=true;continue}
       if(c===separator){row.push(cell);cell='';closed=false;continue}
-      if(c==='\n'||c==='\r'){row.push(cell);if(row.some(v=>v.length))matrix.push(row);row=[];cell='';closed=false;if(c==='\r'&&source[i+1]==='\n')i++;continue}
+      if(c==='\n'||c==='\r'){row.push(cell);if(explicit||row.some(v=>v.length))matrix.push(row);row=[];cell='';closed=false;explicit=false;if(c==='\r'&&source[i+1]==='\n')i++;continue}
       if(closed&&!/\s/.test(c))throw new Error('引号后的字符无效，请检查 CSV 格式。')
       if(!closed)cell+=c
     }
     if(quoted)throw new Error('CSV 有未闭合的双引号。')
-    row.push(cell);if(row.some(v=>v.length))matrix.push(row)
+    row.push(cell);if(explicit||row.some(v=>v.length))matrix.push(row)
   }
   if(!matrix?.length)throw new Error('请添加包含表头的数据。')
   const width=Math.max(...matrix.slice(0,50002).map(r=>r.length))
@@ -52,5 +52,5 @@ export function aggregate(rows,group,value,method='sum') {
 }
 export function datasetCsv(columns,rows,protectFormulas=true) {
   const quote=value=>{let v=String(value??'');if(protectFormulas&&(/^[\s]*[=+@\t\r]/.test(v)||/^\s*-/.test(v)&&numeric(v)===undefined))v="'"+v;return /[",\r\n]/.test(v)?'"'+v.replaceAll('"','""')+'"':v}
-  return '\ufeff'+[columns,...rows].map(row=>row.map(quote).join(',')).join('\r\n')
+  return '\ufeff'+[columns,...rows].map(row=>row.every(v=>String(v??'')==='')?row.map(()=>'""').join(','):row.map(quote).join(',')).join('\r\n')
 }

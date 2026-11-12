@@ -15,7 +15,7 @@ export function WorkbenchCard({note,onOpen}:{note:CanvasNote;onOpen:()=>void}){
     <button className="read-note-button" data-canvas-ui onClick={onOpen}><ExternalLink size={14}/>{note.kind==='concept'?'查看构想与执行':'打开工作台'}</button>
   </div>
 }
-export function WorkbenchEditor({note,board,onClose,onSave,onChart}:{note:CanvasNote;board:Board;onClose:()=>void;onSave:(patch:Partial<CanvasNote>)=>void;onChart:(note:Partial<CanvasNote>)=>void}){
+export function WorkbenchEditor({note,board,destination='画布',onClose,onSave,onChart}:{note:CanvasNote;board:Board;destination?:'画布'|'项目';onClose:()=>void;onSave:(patch:Partial<CanvasNote>)=>void;onChart:(note:Partial<CanvasNote>)=>void}){
   const [draft,setDraft]=useState(note),[busy,setBusy]=useState(false),[error,setError]=useState('')
   const locked=note.kind==='concept'&&note.concept?.status==='done'
   const patch=(value:Partial<CanvasNote>)=>setDraft(current=>({...current,...value}))
@@ -33,7 +33,7 @@ export function WorkbenchEditor({note,board,onClose,onSave,onChart}:{note:Canvas
   }
   return <div className="modal-overlay workbench-overlay" onKeyDown={event=>{if(event.key==='Escape'){event.stopPropagation();if(!busy)onClose()}}}><section role="dialog" aria-modal="true" aria-label={`编辑${note.title}`} className="workbench-editor"><header className="workbench-editor-header"><div><strong>{note.kind==='code'?'代码学习与输入输出':note.kind==='analysis'?'数据分析工作台':'Next to do · 构想与执行'}</strong><small>{note.kind==='concept'?'修改未实现笔记，将在 Agent 下一次检查时生效。':'编辑内容会随笔记保存。'}</small></div><button className="icon-button" aria-label="关闭工作台" disabled={busy} onClick={onClose}><X size={20}/></button></header>
     <div className="workbench-editor-body"><label>标题<input aria-label="工作台笔记标题" value={draft.title||''} disabled={locked} onChange={e=>patch({title:e.target.value})}/></label>
-      <Suspense fallback={<p role="status">正在打开工作台…</p>}>{note.kind==='code'?<CodeNotebook note={draft} onChange={patch} onBusy={setBusy}/>:note.kind==='analysis'?<DataAnalysis note={draft} onChange={patch} onChart={onChart}/>:<>
+      <Suspense fallback={<p role="status">正在打开工作台…</p>}>{note.kind==='code'?<CodeNotebook note={draft} onChange={patch} onBusy={setBusy}/>:note.kind==='analysis'?<DataAnalysis note={draft} onChange={patch} onChart={onChart} destination={destination}/>:<>
       {locked&&<p className="lab-help">此任务已有完成记录。可查看证据；需要继续修改时点击“重新打开”，保留原结果。</p>}
       <label>构想与实现要求（Markdown）<textarea className="concept-source" aria-label="构想内容" value={draft.body||''} disabled={locked} maxLength={50000} onChange={e=>patch({body:e.target.value})}/></label>
       <label>验收标准<textarea aria-label="构想验收标准" value={draft.concept?.acceptance||''} disabled={locked} maxLength={12000} onChange={e=>patch({concept:{...draft.concept!,acceptance:e.target.value}})}/></label>
@@ -45,7 +45,7 @@ export function WorkbenchEditor({note,board,onClose,onSave,onChart}:{note:Canvas
       {locked&&<button className="secondary-button" onClick={()=>{onSave({concept:{...note.concept!,status:'pending',lease:undefined,history:[...(note.concept?.history||[]),{at:Date.now(),text:'用户重新打开已实现任务，原验证结果保留。'}].slice(-200)}})}}>重新打开，继续实现</button>}
       </>}</Suspense>
       {error&&<p role="alert" className="lab-error">{error}</p>}
-    </div><footer className="workbench-editor-footer"><span>{busy?'正在运行，完成或停止后可保存。':'保存后可继续在画布中连接和整理。'}</span><button className="secondary-button" disabled={busy} onClick={onClose}>取消</button><button className="primary-button" disabled={busy||locked} onClick={save}><Check size={15}/>保存笔记</button></footer></section></div>
+    </div><footer className="workbench-editor-footer"><span>{busy?'运行或调试中，完成或停止后可保存。':destination==='项目'?'保存到当前 Agent 项目。':'保存后可继续在画布中连接和整理。'}</span><button className="secondary-button" disabled={busy} onClick={onClose}>取消</button><button className="primary-button" disabled={busy||locked} onClick={save}><Check size={15}/>保存笔记</button></footer></section></div>
 }
 export function AgentWorkboard({board,onOpen,onCreate}:{board:Board;onOpen:(note:CanvasNote)=>void;onCreate:()=>void}){
   const [,setTick]=useState(0)

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { createRequire, stripTypeScriptTypes } from 'node:module'
 import { sqlProgram } from './sql.mjs'
+import { toolchainPaths, executionEnv } from './toolchains.mjs'
 const require = createRequire(import.meta.url)
 const limit = 262144
 const commands = { python: ['python', ['--version']], cpp: ['g++', ['--version']], c: ['gcc', ['--version']], java: ['java', ['--version']], go: ['go', ['version']], rust: ['rustc', ['--version']] }
@@ -31,7 +32,7 @@ export function createJobs({ assetsDir, derivedDir }) {
   function phase(job, command, args, cwd, input = '', timeout = 15000) {
     if (job.reason || closed) return Promise.resolve(1)
     return new Promise((resolve) => {
-      const env = Object.fromEntries(['PATH', 'Path', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'USERPROFILE', 'HOME', 'LANG'].filter(k => process.env[k]).map(k => [k, process.env[k]]))
+      const env = executionEnv(cwd)
       const child = spawn(command, args, { cwd, windowsHide: true, detached: process.platform !== 'win32', env, stdio: ['pipe', 'pipe', 'pipe'] })
       job.child = child
       let settled = false
@@ -53,14 +54,17 @@ export function createJobs({ assetsDir, derivedDir }) {
     if (capabilities) return capabilities
     capabilities = (async () => {
       const items = [{ id: 'javascript', available: true, version: `Node.js ${process.versions.node}` }, { id: 'typescript', available: true, version: 'Node.js TypeScript（去除类型语法）' }, { id: 'sql', available: true, version: 'SQLite 内存数据库' }, { id: 'html', available: true, version: '隔离页面预览' }]
+      const paths=toolchainPaths()
       await Promise.all(Object.entries(commands).map(async ([id, [command, args]]) => {
         const job = { stdout: '', stderr: '' }
-        const code = await phase(job, command, args, tmpdir(), '', 5000)
-        items.push({ id, available: code === 0, version: code === 0 ? (job.stdout || job.stderr).trim().split('\n')[0] : `需安装 ${command} 并加入 PATH` })
+        const executable=paths[id]
+        const code = await phase(job, executable, args, tmpdir(), '', 5000)
+        items.push({ id, available: code === 0, bundled:executable!==command, version: code === 0 ? (job.stdout || job.stderr).trim().split('\n')[0] : `未安装 ${command}，可重新运行 Own 安装程序选择该语言组件。` })
       }))
       let ffmpeg
       try { ffmpeg = require('ffmpeg-static'); await stat(ffmpeg) } catch { ffmpeg = null }
-      return { languages: items, mediaConversion: !!ffmpeg }
+      const probe={stdout:'',stderr:''},gdb=await phase(probe,paths.gdb,['--version'],tmpdir(),'',5000)
+      return { languages: items, mediaConversion: !!ffmpeg, debugging:['javascript','typescript',...(items.find(i=>i.id==='python'&&i.available)?['python']:[]),...(gdb===0?['c','cpp']:[])] }
     })()
     return capabilities
   }
@@ -106,11 +110,19 @@ export function createJobs({ assetsDir, derivedDir }) {
           const executable = path.join(directory, process.platform === 'win32' ? 'main.exe' : 'main')
           let command, args
           if (['javascript','typescript','sql'].includes(input.language)) { command=process.execPath; args=['--no-warnings', filename] }
-          if (input.language === 'python') { command='python'; args=['-I','-u',filename] }
-          if (input.language === 'java') { command='java'; args=[filename] }
-          if (input.language === 'go') { command='go'; args=['run',filename] }
+          const paths=toolchainPaths()
+          if (input.language === 'python') { command=paths.python; args=['-I','-u',filename] }
+          if (input.language === 'java') { command=paths.java; args=[filename] }
+          if (input.language === 'go') {
+            job.exitCode=await phase(job,paths.go,['build','-o',executable,filename],directory,'',90000)
+            if(job.exitCode!==0||job.reason)return
+            command=executable;args=[]
+          }
           if (['c','cpp','rust'].includes(input.language)) {
-            job.exitCode = await phase(job, input.language === 'rust' ? 'rustc' : input.language === 'c' ? 'gcc' : 'g++', [filename,'-o',executable],directory,'',60000)
+            const compilerArgs=[filename,'-o',executable]
+            if(input.language==='rust'&&paths.rust!=='rustc'&&paths.c!=='gcc')compilerArgs.push('-C',`linker=${paths.c}`,'-C','link-arg=-no-canonical-prefixes')
+            if(input.language!=='rust')compilerArgs.push('-no-canonical-prefixes')
+            job.exitCode = await phase(job, paths[input.language], compilerArgs,directory,'',60000)
             if(job.exitCode !== 0 || job.reason) return
             command=executable; args=[]
           }

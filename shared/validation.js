@@ -80,7 +80,12 @@ export function validNotebook(value) {
     !value.boards.some((board) => board && !board.trashed)
   )
     return false
-  return value.boards.every((board) => {
+  if(value.agentProjects!==undefined&&(!Array.isArray(value.agentProjects)||value.agentProjects.length>1000))return false
+  if(value.appMode!==undefined&&!['notes','agents'].includes(value.appMode))return false
+  if(!optionalString(value.activeAgentProjectId,128))return false
+  const allProjects=[...value.boards,...value.agentProjects||[]]
+  if(new Set(allProjects.map(board=>board?.id)).size!==allProjects.length)return false
+  return allProjects.every((board) => {
     if (
       !board ||
       typeof board.id !== 'string' ||
@@ -142,6 +147,7 @@ export function validNotebook(value) {
             ['group', 'value'].some(key => settings[key] !== undefined && !index(settings[key])) ||
             settings.chartType !== undefined && !['bar', 'line', 'pie'].includes(settings.chartType) ||
             settings.method !== undefined && !['sum', 'mean', 'count'].includes(settings.method) ||
+            settings.order !== undefined && !['source','value','label'].includes(settings.order) ||
             settings.sort !== undefined && (!settings.sort || !index(settings.sort.column) || typeof settings.sort.ascending !== 'boolean') ||
             settings.filter !== undefined && (!settings.filter || !index(settings.filter.column) || !['contains', 'equals', 'greater', 'less'].includes(settings.filter.operator) || !optionalString(settings.filter.value, 20000))) return false
         }

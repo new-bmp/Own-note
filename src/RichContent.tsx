@@ -26,6 +26,7 @@ import {
 import { downloadFile } from './storage'
 import { FormulaInput } from './FormulaInput'
 import { DiagramBuilder } from './DiagramBuilder'
+import { ChartBuilder } from './ChartBuilder'
 
 export const richKinds = ['markdown', 'latex', 'diagram', 'chart']
 export const isRichNote = (note: CanvasNote) => richKinds.includes(note.kind)
@@ -552,7 +553,7 @@ export function RichEditor({
       : note.kind === 'diagram'
         ? '写下节点名称，再选择节点间的关系，右侧实时生成图形。Ctrl + Enter 保存。'
         : note.kind === 'chart'
-          ? '编辑 JSON 数据。type 为 bar、line 或 pie；values 与 labels 一一对应。'
+          ? '像表格一样填写类别和数值，或直接粘贴 Excel 数据。右侧实时预览，Ctrl + Enter 保存。'
           : '支持 Markdown、GFM 表格、行内 $公式$ 和独立 $$公式$$。'
   const patch = (): Partial<CanvasNote> => ({
     title: title.trim(),
@@ -642,7 +643,7 @@ export function RichEditor({
         </label>
         <p className="rich-editor-hint">{hint}</p>
         <div className="rich-editor-columns">
-          {note.kind === 'latex' ? <FormulaInput source={source} onChange={setSource} /> : note.kind === 'diagram' ? <DiagramBuilder source={source} onChange={setSource} /> : <label className="rich-source-label">
+          {note.kind === 'latex' ? <FormulaInput source={source} onChange={setSource} /> : note.kind === 'diagram' ? <DiagramBuilder source={source} onChange={setSource} /> : note.kind === 'chart' ? <ChartBuilder chart={note.chart!} onChange={chart=>setSource(JSON.stringify(chart))}/> : <label className="rich-source-label">
             {note.kind === 'markdown' ? '正文' : '源码 / 数据'}
             <textarea
               aria-label="卡片源码"

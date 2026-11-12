@@ -81,7 +81,7 @@ async function uploadAsset(id: string, blob: Blob) {
 
 async function migrateAssets(notebook: Notebook) {
   const ids = new Set(
-    notebook.boards.flatMap((board) =>
+    [...notebook.boards,...notebook.agentProjects||[]].flatMap((board) =>
       board.notes.flatMap(assetIdsForNote),
     ),
   )
@@ -267,6 +267,9 @@ export async function refreshNotebook(
     )
   )
     notebook.activeBoardId = current.activeBoardId
+  notebook.appMode = current.appMode
+  if (notebook.agentProjects?.some(project=>project.id===current.activeAgentProjectId&&!project.trashed))
+    notebook.activeAgentProjectId=current.activeAgentProjectId
   serverRevision = response.headers.get('ETag')
   savedSnapshot = JSON.stringify(notebook)
   setCache(STORAGE_KEY, savedSnapshot)

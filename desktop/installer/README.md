@@ -9,3 +9,5 @@ https://github.com/jrsoftware/issrc/blob/is-6_3_1/Files/Languages/Unofficial/Chi
 安装包只接收已经完成的 `release/Own-app-win-x64` 生产目录。它与便携版目录独立，便于便携版运行期间生成安装程序。应用安装到 `%LOCALAPPDATA%\Programs\Own`，笔记仍在 `%LOCALAPPDATA%\Own\workspace`，卸载不会删除笔记和附件。
 
 `InstallerTest` 编译开关使用独立的应用 ID、快捷方式和卸载项，供 `npm run test:installer` 验证真实安装、升级、MCP 读写及卸载流程，不会覆盖正式安装。
+
+1.3 将工具链拆分为组件。默认 `common` 安装 Node.js、Python、GCC/G++ 和 GDB；`full` 安装全部语言，`custom` 可选择 Java、Go、Rust。Rust 组件包含所需 GNU 链接工具。所有组件离线随包提供，不修改系统 PATH。验收先安装默认组件，再升级为全组件，在隔离 PATH 下实际运行和调试，最后卸载测试副本。

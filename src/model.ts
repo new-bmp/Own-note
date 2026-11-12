@@ -1,4 +1,5 @@
 import { diagramSource, diagramTemplates } from '../shared/diagram-builder.js'
+import { migrateAgentProjects } from '../shared/agent-workspace.js'
 
 export type NoteKind =
   | 'text'
@@ -102,6 +103,7 @@ export interface AnalysisSettings {
   value?: number
   method?: string
   chartType?: 'bar' | 'line' | 'pie'
+  order?: 'source' | 'value' | 'label'
 }
 
 export interface CanvasNote {
@@ -170,6 +172,7 @@ export interface Board {
   connections: Connection[]
   captures?: ConversationCapture[]
   agents?: AgentPresence[]
+  legacyBoardId?: string
 }
 export interface Appearance {
   accent: string
@@ -182,6 +185,9 @@ export interface Notebook {
   activeBoardId: string
   workspaceVersion?: 1
   appearance?: Appearance
+  agentProjects?: Board[]
+  activeAgentProjectId?: string
+  appMode?: 'notes' | 'agents'
 }
 export interface Viewport {
   x: number
@@ -567,6 +573,7 @@ export function initialNotebook(): Notebook {
 }
 
 export function upgradeWorkspace(notebook: Notebook): Notebook {
+  notebook=migrateAgentProjects(notebook)
   if (notebook.workspaceVersion === 1) return notebook
   const boards = notebook.boards.some((board) => board.id === 'work-launch')
     ? notebook.boards

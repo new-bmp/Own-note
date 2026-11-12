@@ -5,6 +5,23 @@ import { zipSync, strToU8 } from 'fflate'
 import { parseDataset, summarize, filterRows, aggregate, datasetCsv } from '../shared/data-analysis.js'
 import { previewType, inferMime } from '../shared/attachments.js'
 import { readOffice } from '../src/office-preview.ts'
+import { chartFromGrid, chartGrid, clipboardGrid } from '../shared/chart-grid.js'
+
+test('editable data keeps explicit empty rows and chart grids accept Excel paste without requiring JSON',()=>{
+  const source=datasetCsv(['类别','数量'],[['甲','3'],['',''],['乙','5'],['','']],false)
+  assert.deepEqual(parseDataset(source).rows,[['甲','3'],['',''],['乙','5'],['','']])
+  assert.deepEqual(parseDataset('a,b\n\n1,2\n\n').rows,[['1','2']],'accidental blank lines in imported CSV remain ignored')
+  const grid=clipboardGrid('类别\t本月\t上月\n甲\t3\t2\n乙\t5\t4')
+  const chart=chartFromGrid(grid,'line','小时')
+  assert.deepEqual(chart.labels,['甲','乙']);assert.deepEqual(chart.series.map(s=>s.values),[[3,5],[2,4]])
+  assert.deepEqual(chartGrid(chart),grid);assert.equal(chart.unit,'小时')
+  assert.throws(()=>chartFromGrid([['类别','值'],['甲','']]),/第 1 行/)
+  assert.throws(()=>chartFromGrid([['类别','值'],['甲','NaN']]),/有效数值/)
+  assert.throws(()=>chartFromGrid([['类别','值'],['','3']]),/类别名称/)
+  assert.throws(()=>chartFromGrid(grid,'pie'),/饼图/)
+  assert.throws(()=>chartFromGrid([['类别','值'],['甲','0']],'pie'),/饼图/)
+  assert.equal(chartFromGrid([['类别','值'],['甲','3'],['乙','5']],'pie').series[0].values[1],5)
+})
 
 test('analysis preserves quoted CSV, multiline fields and duplicate headers and handles missing values honestly', () => {
   const data = parseDataset('\ufeff"分,组",值,值 (2),值\r\n"甲\n乙",2,4,\r\n"O""wn",,6,-2\r\n')

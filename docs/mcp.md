@@ -83,6 +83,8 @@ url = "http://127.0.0.1:5173/mcp"
 | 工具                    | 用途                                                   |
 | ----------------------- | ------------------------------------------------------ |
 | `own_list_boards`       | 按项目名查找画布，默认返回摘要，支持 offset / limit    |
+| `own_list_agent_projects` | 查找独立 Agent 项目，返回项目 ID、任务计数和阅读链接 |
+| `own_create_agent_project` | 创建独立 Agent 项目，支持 requestId 幂等重试        |
 | `own_search`            | 搜索文字、任务、表格、公式及图源码，返回片段和定位链接 |
 | `own_read_board`        | 分页读取卡片，附 `contentHash` 和会话来源              |
 | `own_read_conversation` | 按 `requestId` 分页读回整份会话与核对结果，可读原稿   |
@@ -130,11 +132,13 @@ Mermaid 支持流程图、时序图、类图、状态图、ER 图、思维导图
 
 ## Next to do 协议
 
-`own_publish_plan` 接受 `boardId`、`requestId`、`agentId`、`agentName?`、`title`、完整 `markdown` 和 `tasks`。每项任务包含临时 `id`、`title`、`markdown`、`acceptance`、`dependsOn`。依赖用该批任务的临时 ID，服务转为持久笔记 ID。最多 100 个任务；重复或不存在的依赖和循环依赖会使整次发布失败。
+Next to do 使用独立于画布的 `agentProjects` 存储。先调用 `own_list_agent_projects({query?})` 查找，或用 `own_create_agent_project({requestId,title,description?})` 创建，取得 `projectId` 和 `projectUrl`。后续协作工具均传 `projectId`。旧客户端的 `boardId` 仍兼容，并关联到独立项目。
+
+`own_publish_plan` 接受 `projectId`、`requestId`、`agentId`、`agentName?`、`title`、完整 `markdown` 和 `tasks`。每项任务包含临时 `id`、`title`、`markdown`、`acceptance`、`dependsOn`。依赖用该批任务的临时 ID，服务转为持久笔记 ID。最多 100 个任务；重复或不存在的依赖和循环依赖会使整次发布失败。
 
 ```json
 {
-  "boardId": "从 own_list_boards 获取",
+  "projectId": "从 own_list_agent_projects 获取",
   "requestId": "plan-001",
   "agentId": "my-agent",
   "title": "实现学习示例",
@@ -146,7 +150,9 @@ Mermaid 支持流程图、时序图、类图、状态图、ER 图、思维导图
 }
 ```
 
-然后调用 `own_agent_next({boardId, agentId})`。`status: running` 返回当前 `note`、`leaseToken`、`revision`；只执行这个版本。至少每 30 秒以及关键动作前后调用 `own_agent_report({boardId, agentId, noteId, leaseToken, revision, status, progress, evidence?})`。完成需 `status: done` 和真实 `evidence`；阻塞时用 `blocked`。修改、暂停、删除、依赖重新打开或 120 秒凭证过期后，旧报告返回 `needsReplan: true`，必须重新领取。没有任务时返回 `waiting`，工具不会替客户端安排自动继续。
+然后调用 `own_agent_next({projectId, agentId})`。`status: running` 返回当前 `note`、`leaseToken`、`revision`；只执行这个版本。至少每 30 秒以及关键动作前后调用 `own_agent_report({projectId, agentId, noteId, leaseToken, revision, status, progress, evidence?})`。完成需 `status: done` 和真实 `evidence`；阻塞时用 `blocked`。修改、暂停、删除、依赖重新打开或 120 秒凭证过期后，旧报告返回 `needsReplan: true`，必须重新领取。没有任务时返回 `waiting`，工具不会替客户端安排自动继续。
+
+`own_read_board`、`own_add_code`、`own_add_analysis` 和公式 / 图表工具的 `boardId` 也接受 `projectId`，用于将实现代码、数据、解释和产物保存在项目资料中；运行由用户主动触发。`own_search` 同时搜索画布与独立项目。
 
 状态以实际上报为准，75 秒内心跳显示在线。任务公开展示方案、要求、进展、证据及修改记录，不要求或输出隐藏推理。仅配置 MCP 不会暴露客户端内部 todo。详细行为见 [工作台说明](workbench.md)。
 

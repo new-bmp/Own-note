@@ -87,11 +87,13 @@ import { importAssets } from './import-assets'
 import type { ImportProgress } from './import-assets'
 import { assetIdsForNote, remapNoteAssets } from '../shared/attachments.js'
 import { restoreAgentActivity } from '../shared/concepts.js'
+import { migrateAgentProjects } from '../shared/agent-workspace.js'
 import { mergeWorkspaces } from '../shared/workspace-merge.js'
 import { connectionGeometry, connectionSides, nearestSide } from '../shared/connections.js'
 import type { ConnectionSide } from '../shared/connections.js'
 import { ConnectionPanel } from './ConnectionPanel'
-import { WorkbenchCard, WorkbenchEditor, AgentWorkboard, isWorkbenchNote } from './Workbench'
+import { WorkbenchCard, WorkbenchEditor, isWorkbenchNote } from './Workbench'
+import { AgentStudio } from './AgentStudio'
 import type { TaskDraft, WorkspaceView } from './WorkViews'
 import type {
   Board,
@@ -297,6 +299,10 @@ export default function App({
 }) {
   const [notebook, setNotebook] = useState<Notebook>(initialNotebook)
   const notebookRef = useRef(notebook)
+  const appMode=notebook.appMode||'notes'
+  const agentProjects=(notebook.agentProjects||[]).filter(p=>!p.trashed)
+  const agentProject=agentProjects.find(p=>p.id===notebook.activeAgentProjectId)||agentProjects[0]
+  const setAppMode=(mode:'notes'|'agents')=>{apply({...notebookRef.current,appMode:mode},false);setSidebarOpen(false)}
   const activeBoard =
     notebook.boards.find(
       (b) => b.id === notebook.activeBoardId && !b.trashed,
@@ -517,6 +523,22 @@ export default function App({
     )
   }
 
+  function updateAgentProject(edit:(project:Board)=>Board){
+    const current=notebookRef.current,projectId=current.activeAgentProjectId||current.agentProjects?.find(p=>!p.trashed)?.id
+    apply({...current,agentProjects:(current.agentProjects||[]).map(p=>p.id===projectId?{...edit(p),updatedAt:Date.now()}:p)})
+  }
+  function createAgentProject(){
+    const project={...makeBoard(`Agent 项目 ${(notebookRef.current.agentProjects?.length||0)+1}`),id:'agent-'+uid(),notes:[],connections:[],agents:[]}
+    apply({...notebookRef.current,appMode:'agents',activeAgentProjectId:project.id,agentProjects:[...notebookRef.current.agentProjects||[],project]})
+  }
+  function createAgentTask(){const note=makeNote('concept',0,0);updateAgentProject(p=>({...p,notes:[...p.notes,note]}));setRichEditing(note)}
+  function saveEditorNote(id:string,patch:Partial<CanvasNote>){if(appMode==='agents')updateAgentProject(p=>({...p,notes:p.notes.map(n=>n.id===id?{...n,...patch}:n)}));else updateNote(id,patch)}
+  function openAgentNote(note:CanvasNote){if(['file','folder','image'].includes(note.kind))setPreview(note);else setRichEditing(note)}
+  function addEditorChart(fields:Partial<CanvasNote>){
+    if(appMode==='agents'){updateAgentProject(project=>({...project,notes:[...project.notes,{...makeNote('chart',0,0),...fields}]}));notify('图表已保存到当前 Agent 项目。')}
+    else{addNote('chart',undefined,fields);setRichEditing(richEditing)}
+  }
+
   function undo() {
     const previous = history.current.pop()
     if (!previous) return
@@ -597,11 +619,11 @@ export default function App({
     return () => observer.disconnect()
     // A new board gets its own fitted starting view.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeBoard.id])
+  }, [activeBoard.id, appMode])
 
   useEffect(() => {
-    document.title = `${activeBoard.title} · Own`
-  }, [activeBoard.title])
+    document.title = `${appMode==='agents'?(agentProject?.title||'Agent Next to do'):activeBoard.title} · Own`
+  }, [activeBoard.title, agentProject?.title, appMode])
 
   useEffect(() => {
     setSaving(true)
@@ -745,6 +767,13 @@ export default function App({
   useEffect(() => {
     if (deepLinkHandled.current || !stageSize.width) return
     const params = new URLSearchParams(window.location.search)
+    if(params.get('mode')==='agents'){
+      const project=notebookRef.current.agentProjects?.find(p=>p.id===params.get('project')&&!p.trashed)
+      apply({...notebookRef.current,appMode:'agents',...(project?{activeAgentProjectId:project.id}:{})},false)
+      deepLinkHandled.current=true
+      const note=project?.notes.find(n=>n.id===params.get('note'));if(note)openAgentNote(note)
+      return
+    }
     const board = notebookRef.current.boards.find(
       (board) => board.id === params.get('board') && !board.trashed,
     )
@@ -794,11 +823,12 @@ export default function App({
   }
 
   function selectBoard(id: string) {
-    if (id !== activeBoard.id) {
+    if (id !== activeBoard.id || notebookRef.current.appMode==='agents') {
       apply(
         {
           ...notebookRef.current,
           activeBoardId: id,
+          appMode:'notes',
           boards: notebookRef.current.boards.map((b) =>
             b.id === id ? { ...b, lastOpenedAt: Date.now() } : b,
           ),
@@ -1203,6 +1233,14 @@ export default function App({
         event.isComposing
       )
         return
+      if(appMode==='agents'){
+        if(event.ctrlKey||event.metaKey){
+          if(event.key.toLowerCase()==='s'){event.preventDefault();void saveNow()}
+          if(event.key.toLowerCase()==='z'){event.preventDefault();if(event.shiftKey)redo();else undo()}
+          if(event.key.toLowerCase()==='y'){event.preventDefault();redo()}
+        }else if(event.key.toLowerCase()==='f')setFocusMode(value=>!value)
+        return
+      }
       if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
         event.preventDefault()
         openCapture()
@@ -1313,7 +1351,7 @@ export default function App({
       const current = structuredClone(notebookRef.current)
       const assetIds = [
         ...new Set(
-          current.boards.flatMap((b) =>
+          [...current.boards,...current.agentProjects||[]].flatMap((b) =>
             b.notes.flatMap(assetIdsForNote),
           ),
         ),
@@ -1351,7 +1389,8 @@ export default function App({
     if (!recovery) return
     try {
       await restoreRecoveryAssets(recovery)
-      const boards = recovery.boards
+      const migrated=migrateAgentProjects(recovery)
+      const boards = migrated.boards
         .filter((board) => !board.trashed)
         .map((board) => ({
           ...board,
@@ -1359,26 +1398,30 @@ export default function App({
           title: `${board.title}（恢复副本）`,
         }))
       if (!boards.length) return
+      const projects=(migrated.agentProjects||[]).filter(project=>!project.trashed).map(restoreAgentActivity).map(project=>({...project,id:'agent-'+uid(),legacyBoardId:undefined,title:project.title+'（恢复副本）'}))
       apply({
         ...notebookRef.current,
         boards: [...notebookRef.current.boards, ...boards],
         activeBoardId: boards[0].id,
+        agentProjects:[...notebookRef.current.agentProjects||[],...projects],
+        appMode:'notes',
       })
       clearRecoveryNotebook()
       setRecoveryAvailable(false)
       setModal(null)
       setWorkspaceView('canvas')
-      notify('未保存记录已恢复为独立画布。')
+      notify('未保存记录已恢复为画布和 Agent 项目副本。')
     } catch {
       notify('恢复未完成，请确认本地服务正在运行后重试。')
     }
   }
 
   function exportMarkdown() {
+    const exportedBoard=appMode==='agents'&&agentProject?agentProject:activeBoard
     const text = [
-      `# ${activeBoard.title}`,
-      activeBoard.description,
-      ...activeBoard.notes.map((note) => {
+      `# ${exportedBoard.title}`,
+      exportedBoard.description,
+      ...exportedBoard.notes.map((note) => {
         if (note.kind === 'code') return `## ${note.title}\n\n${note.body||''}\n\n${(note.cells||[]).map((cell,i)=>`### 单元 ${i+1}\n\n\`\`\`${cell.language}\n${cell.code}\n\`\`\`\n\n输入：\n\`\`\`text\n${cell.stdin}\n\`\`\`\n\n预期：\n\`\`\`text\n${cell.expected||''}\n\`\`\`\n\n实际输出：\n\`\`\`text\n${cell.output||''}\n${cell.error||''}\n\`\`\``).join('\n\n')}`
         if (note.kind === 'analysis') return `## ${note.title}\n\n\`\`\`${note.analysisFormat||'csv'}\n${note.analysisSource||''}\n\`\`\``
         if (note.kind === 'concept') return `## ${note.title}\n\n状态：${note.concept?.status}\n\n${note.body||''}\n\n### 验收标准\n${note.concept?.acceptance||''}\n\n### 最新进展\n${note.concept?.progress||''}\n\n### 产物与验证\n${note.concept?.evidence||''}`
@@ -1401,7 +1444,7 @@ export default function App({
     ].join('\n\n')
     downloadFile(
       new Blob([text], { type: 'text/markdown;charset=utf-8' }),
-      `${activeBoard.title}.md`,
+      `${exportedBoard.title}.md`,
     )
     setModal(null)
     notify('文字已导出为 Markdown。')
@@ -1414,10 +1457,10 @@ export default function App({
         notebook: unknown
         assets?: Record<string, string>
       }
-      const imported = backup.notebook
-      if (!validNotebook(imported)) throw new Error('Invalid file')
+      if (!validNotebook(backup.notebook)) throw new Error('Invalid file')
+      const imported = migrateAgentProjects(backup.notebook)
       const assets = backup.assets ?? {}
-      if (imported.boards.flatMap((board) => board.notes.flatMap(assetIdsForNote)).some((id) => !(id in assets)))
+      if ([...imported.boards,...imported.agentProjects||[]].flatMap((board) => board.notes.flatMap(assetIdsForNote)).some((id) => !(id in assets)))
         throw new Error('备份中缺少原始附件，无法完整恢复。')
       const newIds = new Map<string, string>()
       for (const [id, dataUrl] of Object.entries(assets)) {
@@ -1436,15 +1479,18 @@ export default function App({
           notes: board.notes.map((note) => remapNoteAssets(note, newIds)),
         }))
       if (!boards.length) throw new Error('Empty backup')
+      const restoredProjects=(imported.agentProjects||[]).filter(p=>!p.trashed).map(restoreAgentActivity).map(project=>({...project,id:'agent-'+uid(),legacyBoardId:undefined,notes:project.notes.map(note=>remapNoteAssets(note,newIds))}))
       apply({
         ...notebookRef.current,
         boards: [...notebookRef.current.boards, ...boards],
+        agentProjects:[...notebookRef.current.agentProjects||[],...restoredProjects],
         activeBoardId: boards[0].id,
+        appMode: 'notes',
         appearance: imported.appearance ?? notebookRef.current.appearance,
       })
       setSelectedId(null)
       setModal(null)
-      notify(`已导入 ${boards.length} 块画布。`)
+      notify(`已导入 ${boards.length} 块画布${restoredProjects.length?`和 ${restoredProjects.length} 个 Agent 项目`:''}。`)
     } catch {
       notify('无法完整导入，请确认备份包含所有原始附件，并选择 Own 导出的 .own 文件。')
     }
@@ -1987,7 +2033,7 @@ export default function App({
       ? (b.lastOpenedAt ?? b.updatedAt) - (a.lastOpenedAt ?? a.updatedAt)
       : 0,
   )
-  const searchResults = boards
+  const searchResults = [...boards,...agentProjects]
     .flatMap((board) => {
       const query = search.trim().toLowerCase()
       if (!query) return [{ board, note: undefined as CanvasNote | undefined }]
@@ -2003,6 +2049,11 @@ export default function App({
     .slice(0, 20)
 
   function focusResult(board: Board, note?: CanvasNote) {
+    if(agentProjects.some(project=>project.id===board.id)){
+      apply({...notebookRef.current,appMode:'agents',activeAgentProjectId:board.id},false)
+      setModal(null);setSearch('');if(note)openAgentNote(note)
+      return
+    }
     selectBoard(board.id)
     setWorkspaceView('canvas')
     setModal(null)
@@ -2021,6 +2072,7 @@ export default function App({
       onDrop={(event) => {
         if (!event.dataTransfer.types.includes('Files')) return
         event.preventDefault()
+        if (appMode==='agents') { notify('文件可拖入自由画布。请先切换到“所有画布”。'); return }
         if (modal || richEditing || preview || reading) { notify('请先关闭当前编辑窗口，再将文件拖到画布。'); return }
         addImport(collectDrop(event.dataTransfer))
       }}
@@ -2039,6 +2091,7 @@ export default function App({
         <button
           className="brand"
           onClick={() => {
+            setAppMode('notes')
             setFilter('all')
             selectBoard(boards[0].id)
           }}
@@ -2075,11 +2128,13 @@ export default function App({
           <kbd>Ctrl K</kbd>
         </button>
         <nav className="main-nav" aria-label="工作区导航">
+          <button className={appMode==='agents'?'nav-active':''} onClick={()=>setAppMode('agents')}><Bot size={17}/><span>Agent Next to do</span></button>
           <button
             className={
-              filter === 'all' && workspaceView === 'canvas' ? 'nav-active' : ''
+              appMode==='notes' && filter === 'all' && workspaceView === 'canvas' ? 'nav-active' : ''
             }
             onClick={() => {
+              setAppMode('notes')
               setFilter('all')
               setWorkspaceView('canvas')
             }}
@@ -2091,22 +2146,22 @@ export default function App({
             </span>
           </button>
           <button
-            className={filter === 'recent' ? 'nav-active' : ''}
-            onClick={() => setFilter('recent')}
+            className={appMode==='notes' && filter === 'recent' ? 'nav-active' : ''}
+            onClick={() => {setAppMode('notes');setFilter('recent')}}
           >
             <Clock3 size={17} />
             <span>最近打开</span>
           </button>
           <button
-            className={filter === 'favorites' ? 'nav-active' : ''}
-            onClick={() => setFilter('favorites')}
+            className={appMode==='notes' && filter === 'favorites' ? 'nav-active' : ''}
+            onClick={() => {setAppMode('notes');setFilter('favorites')}}
           >
             <Star size={17} />
             <span>我的收藏</span>
             <span className="favorite-dot" />
           </button>
         </nav>
-        <div className="boards-label">
+        {appMode==='notes'?<><div className="boards-label">
           <span>
             {filter === 'favorites'
               ? '收藏的画布'
@@ -2163,6 +2218,7 @@ export default function App({
           <Plus size={16} />
           <span>新建画布</span>
         </button>
+        </>:<><div className="boards-label"><span>Agent 独立项目</span><button aria-label="新建 Agent 项目" onClick={createAgentProject}><Plus size={16}/></button></div><div className="board-list">{agentProjects.map(project=><button key={project.id} className={`board-item ${agentProject?.id===project.id?'board-active':''}`} onClick={()=>apply({...notebookRef.current,activeAgentProjectId:project.id},false)}><Bot size={17}/><span>{project.title}</span></button>)}</div><button className="new-board-button" onClick={createAgentProject}><Plus size={16}/>新建 Agent 项目</button></>}
         <div className="sidebar-bottom">
           <button
             className="agent-connect-button"
@@ -2178,13 +2234,14 @@ export default function App({
           <button
             className="sidebar-task-summary"
             onClick={() => {
+              setAppMode('notes')
               setWorkspaceView('tasks')
               setSidebarOpen(false)
             }}
           >
             <span>
               <ListChecks size={16} />
-              <strong>当前项目任务</strong>
+              <strong>{appMode==='agents'?'画布任务':'当前项目任务'}</strong>
               <ArrowUpRight size={14} />
             </span>
             <div>
@@ -2243,10 +2300,10 @@ export default function App({
                 <PanelLeftClose size={18} />
               )}
             </IconButton>
-            <span className="breadcrumb-home">我的画布</span>
+            <span className="breadcrumb-home">{appMode==='agents'?'Agent Next to do':'我的画布'}</span>
             <ChevronRight size={13} />
-            <span className="breadcrumb-current">{activeBoard.title}</span>
-            <IconButton
+            <span className="breadcrumb-current">{appMode==='agents'?(agentProject?.title||'独立工作模式'):activeBoard.title}</span>
+            {appMode==='notes'&&<IconButton
               label={activeBoard.favorite ? '取消收藏画布' : '收藏画布'}
               active={activeBoard.favorite}
               className="header-star"
@@ -2258,7 +2315,7 @@ export default function App({
                 size={15}
                 fill={activeBoard.favorite ? 'currentColor' : 'none'}
               />
-            </IconButton>
+            </IconButton>}
           </div>
           <div className="topbar-actions">
             {workspaceConflict && (
@@ -2330,7 +2387,7 @@ export default function App({
           </div>
         </header>
 
-        <section className="project-header" aria-label="项目信息">
+        {appMode==='agents'?<AgentStudio key={agentProject?.id||'empty'} project={agentProject} onNew={createAgentProject} onUpdate={patch=>updateAgentProject(p=>({...p,...patch}))} onCreate={createAgentTask} onOpen={openAgentNote} onConnect={()=>setModal('agent')}/>:<><section className="project-header" aria-label="项目信息">
           <div className="board-heading" data-canvas-ui>
             <div className="board-heading-title">
               <h1
@@ -2431,7 +2488,6 @@ export default function App({
                       'chart',
                       'code',
                       'analysis',
-                      'concept',
                       'image',
                       'file',
                       'folder',
@@ -2502,7 +2558,6 @@ export default function App({
                   icon: FolderOpen,
                   count: resourceCount,
                 },
-                { id:'agents', label:'Agent 构想', icon:Bot, count:activeBoard.notes.filter(n=>n.kind==='concept'&&n.concept?.status!=='done').length },
               ] as const
             ).map(({ id, label, icon: Icon, count }) => (
               <button
@@ -3136,8 +3191,8 @@ export default function App({
               />
             </div>
           )}
-          {workspaceView === 'agents' && <div className="project-view-panel" role="tabpanel" aria-labelledby="view-tab-agents" id="project-agents"><AgentWorkboard key={activeBoard.id} board={activeBoard} onOpen={setRichEditing} onCreate={()=>{addNote('concept');setWorkspaceView('agents')}}/></div>}
         </div>
+        </>}
       </main>
 
       <input
@@ -3256,7 +3311,7 @@ export default function App({
                           <small>
                             {note
                               ? `${board.title} · ${kindNames[note.kind]}`
-                              : `${board.notes.length} 个内容块 · 画布`}
+                              : `${board.notes.length} 个内容块 · ${agentProjects.some(p=>p.id===board.id)?'Agent 项目':'画布'}`}
                           </small>
                         </span>
                         <ArrowUpRight size={16} />
@@ -3750,15 +3805,16 @@ export default function App({
           note={richEditing}
           onClose={() => setRichEditing(null)}
           onSave={(patch) => {
-            updateNote(richEditing.id, patch)
+            saveEditorNote(richEditing.id, patch)
             setRichEditing(null)
             notify('卡片已更新。')
           }}
         />
       )}
-      {richEditing && isWorkbenchNote(richEditing) && <WorkbenchEditor key={richEditing.id} note={richEditing} board={activeBoard} onClose={()=>setRichEditing(null)} onSave={patch=>{updateNote(richEditing.id,patch);setRichEditing(null)}} onChart={fields=>{addNote('chart',undefined,fields);setRichEditing(richEditing)}}/>}
+      {richEditing && isWorkbenchNote(richEditing) && <WorkbenchEditor key={richEditing.id} note={richEditing} destination={appMode==='agents'?'项目':'画布'} board={appMode==='agents'&&agentProject?agentProject:activeBoard} onClose={()=>setRichEditing(null)} onSave={patch=>{saveEditorNote(richEditing.id,patch);setRichEditing(null)}} onChart={addEditorChart}/>}
 
       {preview && <FileLibrary key={preview.id} note={preview} onClose={() => setPreview(null)} onExtract={(file) => {
+        if(appMode==='agents'){updateAgentProject(project=>({...project,notes:[...project.notes,{...makeNote('file',0,0),assetId:file.assetId,title:file.title,filename:file.filename,mime:file.mime,size:file.size}]}));setPreview(null);return}
         const point = canvasPoint(stageSize.width / 2 + (stageRef.current?.getBoundingClientRect().left || 0), stageSize.height / 2 + (stageRef.current?.getBoundingClientRect().top || 0))
         const copy = { ...makeNote('file', point.x, point.y), assetId: file.assetId, title: file.title, filename: file.filename, mime: file.mime, size: file.size }
         updateBoard((board) => ({ ...board, notes: [...board.notes, copy] }))

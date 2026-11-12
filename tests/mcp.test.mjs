@@ -122,7 +122,7 @@ const capture = () => ({
 test('MCP initializes over HTTP and exposes tools, resources, templates and an organizing prompt', async (t) => {
   const app = await fixture(t)
   const tools = await app.client.listTools()
-  assert.equal(tools.tools.length, 16)
+  assert.equal(tools.tools.length, 18)
   assert.ok(
     tools.tools.some(
       (tool) =>
@@ -519,6 +519,26 @@ const plan = boardId => ({
 })
 const report = (boardId, lease, patch = {}) => ({ boardId, agentId: 'agent-a', noteId: lease.note.id, revision: lease.revision, leaseToken: lease.leaseToken, status: 'running', progress: '准备执行。', ...patch })
 
+test('independent Agent projects can be discovered, created idempotently and used without a canvas ID',async t=>{
+  const app=await fixture(t),before=(await app.notebook()).boards
+  const created=await app.call('own_create_agent_project',{requestId:'independent',title:'独立代码学习',description:'公开实现过程'})
+  assert.equal((await app.call('own_create_agent_project',{requestId:'independent',title:'不会覆盖用户项目名'})).duplicate,true)
+  const list=await app.call('own_list_agent_projects',{query:'代码学习'})
+  assert.equal(list.projects.length,1);assert.equal(list.projects[0].projectId,created.projectId)
+  const args=plan(undefined);delete args.boardId;args.projectId=created.projectId
+  await app.call('own_publish_plan',args)
+  const lease=await app.call('own_agent_next',{projectId:created.projectId,agentId:'agent-a'})
+  assert.equal(lease.status,'running')
+  const reported=await app.call('own_agent_report',{...report(undefined,lease,{status:'done',evidence:'真实验证记录'}),projectId:created.projectId})
+  assert.equal(reported.accepted,true)
+  const code=await app.call('own_add_code',{boardId:created.projectId,requestId:'project-code',title:'实现代码',cells:[{language:'python',code:'print(8)',stdin:''}]})
+  const read=await app.call('own_read_board',{boardId:created.projectId})
+  assert.ok(read.notes.some(n=>n.id===code.noteIds[0]))
+  const found=await app.call('own_search',{query:'实现代码'})
+  assert.ok(found.results.some(n=>n.boardId===created.projectId))
+  assert.deepEqual((await app.notebook()).boards,before,'project operations leave the canvas intact')
+})
+
 test('Agent plan leases follow edited notes, reject stale completion and unlock dependent work only after evidence', async t => {
   const app = await fixture(t), boardId = (await app.notebook()).boards[0].id
   const published = await app.call('own_publish_plan', plan(boardId))
@@ -528,7 +548,9 @@ test('Agent plan leases follow edited notes, reject stale completion and unlock 
   const other = await app.call('own_agent_next', { boardId, agentId: 'agent-b' })
   assert.equal(other.status, 'waiting', 'a second Agent cannot take an active task or its dependency')
   assert.equal((await app.call('own_agent_report', report(boardId, first, { progress: '已检查输入。' }))).accepted, true)
-  await editWorkspace(app, notebook => { notebook.boards[0].notes.find(n => n.id === first.note.id).body = '新要求：必须输出中文，并保留原始数据。' })
+  assert.ok(!(await app.notebook()).boards[0].notes.some(n=>n.id===first.note.id),'Agent tasks stay outside the canvas')
+  assert.match(published.projectUrl,/mode=agents/)
+  await editWorkspace(app, notebook => { notebook.agentProjects[0].notes.find(n => n.id === first.note.id).body = '新要求：必须输出中文，并保留原始数据。' })
   const rejected = await app.call('own_agent_report', report(boardId, first, { status: 'done', evidence: '旧版本结果。' }))
   assert.equal(rejected.accepted, false); assert.equal(rejected.needsReplan, true)
   assert.equal(rejected.note.body, '新要求：必须输出中文，并保留原始数据。')
@@ -545,7 +567,7 @@ test('Agent plan leases follow edited notes, reject stale completion and unlock 
   const status = await app.call('own_agent_status', { boardId })
   assert.equal(status.agents.find(a => a.id === 'agent-b').online, true)
   assert.equal(status.tasks.find(n => n.id === dependency.note.id).concept.lease.token, undefined)
-  await editWorkspace(app, notebook => { notebook.boards[0].notes.find(n => n.id === first.note.id).concept.status = 'pending' })
+  await editWorkspace(app, notebook => { notebook.agentProjects[0].notes.find(n => n.id === first.note.id).concept.status = 'pending' })
   const invalidatedDependency = await app.call('own_agent_report', report(boardId, dependency, { agentId: 'agent-b' }))
   assert.equal(invalidatedDependency.needsReplan, true, 'reopening a dependency invalidates dependent execution')
 })
@@ -557,25 +579,25 @@ test('Agent pause, deletion, expired ownership, dependency cycles and backup res
   assert.equal(cycle.isError, true); assert.equal((await app.notebook()).boards[0].notes.some(n => n.kind === 'concept'), false)
   await app.call('own_publish_plan', plan(boardId))
   const first = await app.call('own_agent_next', { boardId, agentId: 'agent-a' })
-  await editWorkspace(app, notebook => { notebook.boards[0].notes.find(n => n.id === first.note.id).concept.status = 'paused' })
+  await editWorkspace(app, notebook => { notebook.agentProjects[0].notes.find(n => n.id === first.note.id).concept.status = 'paused' })
   assert.equal((await app.call('own_agent_report', report(boardId, first))).needsReplan, true)
   assert.equal((await app.call('own_agent_next', { boardId, agentId: 'agent-a' })).status, 'waiting')
-  await editWorkspace(app, notebook => { notebook.boards[0].notes.find(n => n.id === first.note.id).concept.status = 'pending' })
+  await editWorkspace(app, notebook => { notebook.agentProjects[0].notes.find(n => n.id === first.note.id).concept.status = 'pending' })
   const active = await app.call('own_agent_next', { boardId, agentId: 'agent-a' })
-  const snapshot = (await app.notebook()).boards[0], restored = restoreAgentActivity(snapshot)
+  const snapshot = (await app.notebook()).agentProjects[0], restored = restoreAgentActivity(snapshot)
   assert.equal(restored.agents.length, 0); assert.equal(restored.notes.find(n => n.id === first.note.id).concept.status, 'pending')
   assert.equal(restored.notes.find(n => n.id === first.note.id).concept.lease, undefined)
   assert.deepEqual(restored.notes.find(n => n.title === '验证效果').concept.dependsOn, [first.note.id])
-  await editWorkspace(app, notebook => { const b = notebook.boards[0]; b.notes.find(n => n.id === first.note.id).concept.lease.expiresAt = Date.now() - 1000; b.agents.find(a => a.id === 'agent-a').lastSeenAt = Date.now() - 80000 })
+  await editWorkspace(app, notebook => { const b = notebook.agentProjects[0]; b.notes.find(n => n.id === first.note.id).concept.lease.expiresAt = Date.now() - 1000; b.agents.find(a => a.id === 'agent-a').lastSeenAt = Date.now() - 80000 })
   assert.equal((await app.call('own_agent_status', { boardId })).agents.find(a => a.id === 'agent-a').online, false)
   const reassigned = await app.call('own_agent_next', { boardId, agentId: 'agent-b' })
   assert.equal(reassigned.note.id, first.note.id)
   assert.equal((await app.call('own_agent_report', report(boardId, active))).needsReplan, true)
-  const read = await app.call('own_read_board', { boardId })
+  const read = await app.call('own_read_board', { boardId:snapshot.id })
   const card = read.notes.find(n => n.id === first.note.id)
-  const overwrite = await app.client.callTool({ name: 'own_update_note', arguments: { boardId, noteId: card.id, expectedHash: card.contentHash, body: 'Agent 不应覆盖用户要求。' } })
+  const overwrite = await app.client.callTool({ name: 'own_update_note', arguments: { boardId:snapshot.id, noteId: card.id, expectedHash: card.contentHash, body: 'Agent 不应覆盖用户要求。' } })
   assert.equal(overwrite.isError, true)
-  await editWorkspace(app, notebook => { const b = notebook.boards[0]; b.notes = b.notes.filter(n => n.id !== first.note.id); b.connections = b.connections.filter(e => e.from !== first.note.id && e.to !== first.note.id) })
+  await editWorkspace(app, notebook => { const b = notebook.agentProjects[0]; b.notes = b.notes.filter(n => n.id !== first.note.id); b.connections = b.connections.filter(e => e.from !== first.note.id && e.to !== first.note.id) })
   const deleted = await app.call('own_agent_report', report(boardId, reassigned, { agentId: 'agent-b' }))
   assert.equal(deleted.needsReplan, true); assert.equal(deleted.accepted, false)
   assert.equal((await app.call('own_agent_next', { boardId, agentId: 'agent-b' })).status, 'waiting')
@@ -611,7 +633,7 @@ test('stdio bridge exposes the same tools and persists through the running HTTP 
     errors += data.toString()
   })
   const client = await app.connect(transport)
-  assert.equal((await client.listTools()).tools.length, 16, errors)
+  assert.equal((await client.listTools()).tools.length, 18, errors)
   const response = await client.callTool({
     name: 'own_save_conversation',
     arguments: {

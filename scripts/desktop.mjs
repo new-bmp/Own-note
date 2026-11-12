@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
+import { prepareToolchains, toolchainsDir } from './toolchains.mjs'
 
 if (process.platform !== 'win32') throw new Error('此客户端使用 Windows WebView2，请在 Windows 上构建。')
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
@@ -62,6 +63,7 @@ if (mode !== 'package') {
   child.unref()
   console.log('已启动 Own 桌面客户端。')
 } else {
+  const toolchains = await prepareToolchains()
   const release = path.join(root, 'release')
   const staging = path.join(release, `.own-build-${randomUUID()}`)
   const app = path.join(staging, 'app')
@@ -78,9 +80,13 @@ if (mode !== 'package') {
   await cp(process.execPath, path.join(staging, 'runtime', 'node.exe'))
   const license = await readNodeLicense()
   await writeFile(path.join(staging, 'runtime', 'NODE-LICENSE.txt'), license)
+  for (const toolchain of toolchains)
+    await cp(path.join(toolchainsDir, toolchain.id), path.join(staging, 'runtime', 'toolchains', toolchain.id), { recursive: true })
+  await cp(path.join(toolchainsDir, 'manifest.json'), path.join(staging, 'runtime', 'toolchains', 'manifest.json'))
+  await cp(path.join(root, 'docs', 'toolchains.md'), path.join(staging, 'runtime', 'TOOLCHAINS.md'))
   await cp(path.join(root, 'docs', 'desktop.md'), path.join(staging, '使用说明.md'))
   await cp(path.join(root, 'docs', 'workbench.md'), path.join(staging, 'workbench.md'))
-  await writeFile(path.join(staging, '版本.json'), JSON.stringify({ name: 'Own', version: appVersion, platform: 'win-x64', node: process.versions.node, engine: 'WebView2' }, null, 2))
+  await writeFile(path.join(staging, '版本.json'), JSON.stringify({ name: 'Own', version: appVersion, platform: 'win-x64', node: process.versions.node, engine: 'WebView2', toolchains:toolchains.map(({id,version})=>({id,version,default:['python','mingw'].includes(id)})) }, null, 2))
   const output = path.join(release, installerPayload ? 'Own-app-win-x64' : 'Own-win-x64')
   if (existsSync(output)) await rename(output, `${output}.previous-${Date.now()}`)
   await rename(staging, output)

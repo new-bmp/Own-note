@@ -70,7 +70,7 @@ function newNotebook() {
   return { version: 1, workspaceVersion: 1, boards: [], activeBoardId: '' }
 }
 function getBoard(notebook, boardId) {
-  const board = notebook?.boards.find(
+  const board = [...notebook?.boards||[],...notebook?.agentProjects||[]].find(
     (board) => board.id === boardId && !board.trashed,
   )
   if (!board)
@@ -136,7 +136,7 @@ export function createOwnMcpServer({
     { instructions: ownGuide, maxToolInputElements: 12000 },
   )
   const boardUrl = (boardId, noteId) =>
-    `${baseUrl}/?board=${encodeURIComponent(boardId)}${noteId ? `&note=${encodeURIComponent(noteId)}` : ''}`
+    `${baseUrl}/?${boardId.startsWith('agent-')?'mode=agents&project':'board'}=${encodeURIComponent(boardId)}${noteId ? `&note=${encodeURIComponent(noteId)}` : ''}`
   const describeBoard = (board) => ({
     id: board.id,
     title: board.title,
@@ -262,7 +262,7 @@ export function createOwnMcpServer({
     async ({ query, boardId, offset, limit }) => {
       const { notebook } = await readWorkspace()
       const found = []
-      for (const board of notebook?.boards || []) {
+      for (const board of [...notebook?.boards || [],...notebook?.agentProjects || []]) {
         if (board.trashed || (boardId && board.id !== boardId)) continue
         for (const note of board.notes) {
           const text = plainText(note),

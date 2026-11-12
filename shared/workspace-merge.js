@@ -1,6 +1,6 @@
 const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b)
 const object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value)
-const keyed=new Set(['boards','notes','connections','items','cells','agents'])
+const keyed=new Set(['boards','agentProjects','notes','connections','items','cells','agents'])
 export class MergeConflict extends Error {}
 // A three-way merge keeps independent user edits and Agent reports. A changed
 // value is never silently selected over a different edit to that same value.
@@ -9,6 +9,7 @@ export function mergeWorkspaces(base,local,remote) {
     if(same(left,right)||same(right,before))return left
     if(same(left,before))return right
     const key=path.split('.').at(-1)
+    if(keyed.has(key)&&before===undefined&&Array.isArray(left)&&Array.isArray(right))return merge([],left,right,path)
     if(['updatedAt','lastOpenedAt'].includes(key)&&[left,right].every(Number.isFinite))return Math.max(left,right)
     if(path.endsWith('.concept.lease')&&left===undefined&&before?.token===right?.token&&before?.revision===right?.revision)return undefined
     if(key==='history'&&[before,left,right].every(Array.isArray)&&same(left.slice(0,before.length),before)&&same(right.slice(0,before.length),before)){
