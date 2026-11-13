@@ -15,6 +15,7 @@ export type NoteKind =
   | 'latex'
   | 'diagram'
   | 'chart'
+  | 'program'
   | 'code'
   | 'analysis'
   | 'concept'
@@ -95,6 +96,27 @@ export interface FolderEntry {
 }
 
 export interface CodeCell { id: string; language: string; code: string; stdin: string; expected?: string; output?: string; error?: string; exitCode?: number; executedAt?: number; executedCode?: string; executedLanguage?: string; executedInput?: string; executionCount?: number }
+export interface WebInteraction { mode: 'preview' | 'interactive'; approvedOrigin?: string; approvedAt?: number }
+export type ProgramDriverType = 'tcp' | 'serial-lan' | 'udp' | 'websocket'
+export interface ProgramDriver {
+  id: string
+  name?: string
+  type: ProgramDriverType
+  host?: string
+  port?: number
+  baudRate?: number
+  encoding?: 'utf8' | 'base64'
+  enabled?: boolean
+  approvedAt?: number
+}
+export interface ProgramFrame { at: number; values: Record<string, string | number | boolean> }
+export interface ProgramAnimation {
+  width: number
+  height: number
+  durationMs: number
+  loop: boolean
+  frames: ProgramFrame[]
+}
 export interface ConceptState { planId: string; status: 'pending' | 'running' | 'done' | 'blocked' | 'paused'; acceptance: string; dependsOn: string[]; agentId?: string; progress?: string; evidence?: string; nextAction?: string; blockers?: string[]; artifactIds?: string[]; checkpointId?: string; lease?: { token: string; revision: string; projectRevision?: string; expiresAt: number }; history?: { at: number; text: string }[] }
 export interface AgentBrief { goal: string; scope: string; constraints: string; acceptance: string; paused: boolean; allowCode: boolean; allowMedia: boolean }
 export interface AgentPresence { id: string; name: string; lastSeenAt: number; currentNoteId?: string; summary?: string }
@@ -140,6 +162,9 @@ export interface CanvasNote {
   modelSettings?: { wireframe: boolean; grid: boolean; autoRotate: boolean }
   analysisOrigin?: { noteId: string; contentHash: string; settings: AnalysisSettings; rows: number; totalGroups: number }
   cells?: CodeCell[]
+  webInteraction?: WebInteraction
+  programDrivers?: ProgramDriver[]
+  animation?: ProgramAnimation
   analysisSource?: string
   analysisFormat?: 'csv' | 'tsv' | 'json'
   analysisSettings?: AnalysisSettings
@@ -161,7 +186,7 @@ export interface Connection {
 export interface Board {
   parentBoardId?: string
   creationRequest?: { requestId: string; fingerprint: string }
-  executionReceipts?: { requestId: string; kind: 'code' | 'debug' | 'media'; fingerprint: string; at: number }[]
+  executionReceipts?: { requestId: string; kind: 'code' | 'program' | 'debug' | 'media'; fingerprint: string; at: number }[]
   id: string
   title: string
   description: string
@@ -214,6 +239,8 @@ export function makeNote(kind: NoteKind, x: number, y: number): CanvasNote {
       return { ...base, width: 400, height: 300, title: '子画布', body: '双击进入，共用工作空间存储。' }
     case 'code':
       return { ...base, width: 560, height: 420, title: '代码实验笔记', body: '修改代码与输入，运行并比较输出。', cells: [{ id: uid(), language: 'javascript', code: 'const input = await new Promise(resolve => { let text = ""; process.stdin.on("data", chunk => text += chunk); process.stdin.on("end", () => resolve(text)); });\nconst numbers = input.trim().split(/\\s+/).map(Number);\nconsole.log(numbers.reduce((sum, value) => sum + value, 0));', stdin: '3 5 8', expected: '16\n' }] }
+    case 'program':
+      return { ...base, width: 620, height: 560, title: '可编程块', body: '按单元运行代码、观察变量，连接设备或制作动画。', cells: [{ id: uid(), language: 'javascript', code: 'const input = await new Promise(resolve => { let text = ""; process.stdin.on("data", chunk => text += chunk); process.stdin.on("end", () => resolve(text)); });\nconst numbers = input.trim().split(/\\s+/).map(Number);\nconsole.log(numbers.reduce((sum, value) => sum + value, 0));', stdin: '3 5 8', expected: '16\n' }], programDrivers: [], animation: { width: 640, height: 360, durationMs: 3000, loop: true, frames: [{ at: 0, values: { x: 0, y: 0, opacity: 1 } }, { at: 3000, values: { x: 320, y: 180, opacity: 1 } }] } }
     case 'analysis':
       return { ...base, width: 520, height: 360, title: '数据分析', analysisFormat: 'csv', analysisSource: '日期,类别,金额\n2026-11-01,设计,120\n2026-11-02,开发,350\n2026-11-03,设计,180\n2026-11-04,开发,420' }
     case 'concept':
@@ -586,14 +613,26 @@ export function initialNotebook(): Notebook {
 
 export function upgradeWorkspace(notebook: Notebook): Notebook {
   notebook=migrateAgentProjects(notebook)
-  if (notebook.workspaceVersion === 1) return notebook
-  const boards = notebook.boards.some((board) => board.id === 'work-launch')
-    ? notebook.boards
-    : [projectBoard(), ...notebook.boards]
+  let migrated = notebook
+  const migratePrograms = (board: Board): Board => {
+    let changed = false
+    const notes = board.notes.map(note => {
+      if (note.kind !== 'code') return note
+      changed = true
+      return { ...note, kind: 'program' as NoteKind, title: note.title === '代码实验笔记' ? '可编程块' : note.title }
+    })
+    return changed ? { ...board, notes } : board
+  }
+  const boards = notebook.boards.map(migratePrograms), projects = notebook.agentProjects?.map(migratePrograms)
+  if (boards.some((board, index) => board !== notebook.boards[index]) || projects?.some((board, index) => board !== notebook.agentProjects?.[index])) migrated = { ...notebook, boards, ...(projects ? { agentProjects: projects } : {}) }
+  if (migrated.workspaceVersion === 1) return migrated
+  const upgradedBoards = migrated.boards.some((board) => board.id === 'work-launch')
+    ? migrated.boards
+    : [projectBoard(), ...migrated.boards]
   const activeBoardId =
-    boards.find((board) => board.id === 'work-launch' && !board.trashed)?.id ??
-    boards.find((board) => !board.trashed)!.id
-  return { ...notebook, workspaceVersion: 1, boards, activeBoardId }
+    upgradedBoards.find((board) => board.id === 'work-launch' && !board.trashed)?.id ??
+    upgradedBoards.find((board) => !board.trashed)!.id
+  return { ...migrated, workspaceVersion: 1, boards: upgradedBoards, activeBoardId }
 }
 
 export function arrangeNotes(notes: CanvasNote[]): CanvasNote[] {
@@ -631,6 +670,8 @@ export function noteSearchText(note: CanvasNote): string {
     note.concept?.evidence,
     ...(note.cells?.map(cell => `${cell.language} ${cell.code} ${cell.stdin} ${cell.output || ''}`) ?? []),
     note.source?.agent,
+    ...(note.programDrivers?.map((driver) => `${driver.name || ''} ${driver.type} ${driver.host || ''} ${driver.port || ''}`) ?? []),
+    ...(note.animation?.frames.flatMap((frame) => Object.entries(frame.values).map(([key, value]) => `${key} ${value}`)) ?? []),
     ...(note.entries?.map((entry) => entry.path) ?? []),
     ...(note.items?.map((i) => `${i.text} ${i.owner || ''}`) ?? []),
     ...(note.chart?.labels ?? []),

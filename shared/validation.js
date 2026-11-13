@@ -18,7 +18,7 @@ const noteKinds = new Set([
   'latex',
   'diagram',
   'chart',
-  'code', 'analysis', 'concept',
+  'code', 'program', 'analysis', 'concept',
 ])
 const hexColor = /^#[\da-f]{6}$/i
 const optionalString = (value, max = 100000) =>
@@ -92,7 +92,7 @@ export function validNotebook(value) {
   if((value.agentProjects||[]).some(board=>board?.parentBoardId!==undefined||Array.isArray(board?.notes)&&board.notes.some(note=>note?.kind==='board')))return false
   return allProjects.every((board) => {
     if(board?.agentBrief!==undefined&&!validAgentBrief(board.agentBrief))return false
-    if(board?.executionReceipts!==undefined&&(!Array.isArray(board.executionReceipts)||board.executionReceipts.length>1000||!board.executionReceipts.every(r=>r&&typeof r.requestId==='string'&&r.requestId.length>0&&r.requestId.length<=128&&['code','debug','media'].includes(r.kind)&&typeof r.fingerprint==='string'&&/^[a-f0-9]{64}$/.test(r.fingerprint)&&Number.isFinite(r.at))))return false
+    if(board?.executionReceipts!==undefined&&(!Array.isArray(board.executionReceipts)||board.executionReceipts.length>1000||!board.executionReceipts.every(r=>r&&typeof r.requestId==='string'&&r.requestId.length>0&&r.requestId.length<=128&&['code','program','debug','media'].includes(r.kind)&&typeof r.fingerprint==='string'&&/^[a-f0-9]{64}$/.test(r.fingerprint)&&Number.isFinite(r.at))))return false
     if (
       !board ||
       typeof board.id !== 'string' ||
@@ -133,7 +133,7 @@ export function validNotebook(value) {
           return false
         if (note.kind === 'concept' && !validConcept(note.concept)) return false
         if (note.concept !== undefined && !validConcept(note.concept)) return false
-        if (note.kind === 'code' && (!Array.isArray(note.cells) || note.cells.length < 1)) return false
+        if (['code', 'program'].includes(note.kind) && (!Array.isArray(note.cells) || note.cells.length < 1)) return false
         if (note.cells !== undefined && (
           !Array.isArray(note.cells) || note.cells.length > 40 ||
           new Set(note.cells.map(cell => cell?.id)).size !== note.cells.length ||
@@ -146,6 +146,24 @@ export function validNotebook(value) {
             optionalString(cell.executedInput, 64000) && optionalString(cell.executedLanguage, 30) &&
             ['exitCode', 'executedAt', 'executionCount'].every(key => cell[key] === undefined || Number.isFinite(cell[key])))
         )) return false
+        if (note.webInteraction !== undefined) {
+          const interaction = note.webInteraction
+          if (!interaction || !['preview', 'interactive'].includes(interaction.mode) ||
+            (interaction.approvedOrigin !== undefined && (typeof interaction.approvedOrigin !== 'string' || interaction.approvedOrigin.length > 400 || !/^https?:\/\//.test(interaction.approvedOrigin))) ||
+            (interaction.approvedAt !== undefined && !Number.isFinite(interaction.approvedAt))) return false
+          if (note.kind !== 'link') return false
+        }
+        if (note.programDrivers !== undefined) {
+          if (!Array.isArray(note.programDrivers) || note.programDrivers.length > 32) return false
+          const driverIds = new Set(note.programDrivers.map(driver => driver?.id))
+          if (driverIds.size !== note.programDrivers.length || note.programDrivers.some(driver => !driver || typeof driver.id !== 'string' || driver.id.length < 1 || driver.id.length > 128 || !['tcp','serial-lan','udp','websocket'].includes(driver.type) || (driver.name !== undefined && !optionalString(driver.name, 160)) || (driver.host !== undefined && !optionalString(driver.host, 255)) || (driver.port !== undefined && (!Number.isInteger(driver.port) || driver.port < 1 || driver.port > 65535)) || (driver.baudRate !== undefined && (!Number.isInteger(driver.baudRate) || driver.baudRate < 300 || driver.baudRate > 4000000)) || (driver.encoding !== undefined && !['utf8','base64'].includes(driver.encoding)) || (driver.enabled !== undefined && typeof driver.enabled !== 'boolean') || (driver.approvedAt !== undefined && !Number.isFinite(driver.approvedAt)))) return false
+          if (!['program','code'].includes(note.kind)) return false
+        }
+        if (note.animation !== undefined) {
+          const animation = note.animation
+          if (!animation || !Number.isInteger(animation.width) || animation.width < 1 || animation.width > 10000 || !Number.isInteger(animation.height) || animation.height < 1 || animation.height > 10000 || !Number.isInteger(animation.durationMs) || animation.durationMs < 1 || animation.durationMs > 86400000 || typeof animation.loop !== 'boolean' || !Array.isArray(animation.frames) || animation.frames.length > 1000 || !animation.frames.every(frame => frame && Number.isFinite(frame.at) && frame.at >= 0 && frame.at <= animation.durationMs && frame.values && typeof frame.values === 'object' && !Array.isArray(frame.values) && Object.keys(frame.values).length <= 100 && Object.values(frame.values).every(value => typeof value === 'string' || typeof value === 'boolean' || Number.isFinite(value)))) return false
+          if (!['program','code'].includes(note.kind)) return false
+        }
         if (!optionalString(note.analysisSource,2000000) || note.analysisFormat!==undefined&&!['csv','tsv','json'].includes(note.analysisFormat)) return false
         if (note.analysisSettings !== undefined) {
           const settings = note.analysisSettings

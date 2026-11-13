@@ -15,6 +15,16 @@ export const featureHelp={
     example:{tool:'own_debug_command',arguments:{jobId:'启动返回的 id',action:'configure',breakpoints:[3],watches:['total * 2']}},
     recovery:'编辑语言不一定可执行，先核对 runtime.languages/debugging。输入和源码必须先保存。相同 requestId 重试不重跑，源码hash冲突先重读。',
   },
+  program:{
+    steps:['own_add_program 保存 cells、drivers 和 animation；own_read_note 获取 note.id、cell.id、contentHash','own_run_program 或 own_start_program_debug 显式运行/调试，轮询 own_program_result；变量、stdout 和结果写回受源码 hash 保护','own_configure_program_driver 保存 TCP/Serial over LAN/UDP/WebSocket 参数；own_connect_program_driver 只返回等待用户确认，连接后再 own_send_program_data 或 own_read_program_stream'],
+    example:{tool:'own_add_program',arguments:{boardId:'画布ID',requestId:'program-001',title:'传感器与动画',cells:[{language:'javascript',code:'console.log("ready")',stdin:''}],drivers:[{type:'serial-lan',host:'192.168.1.20',port:4001,encoding:'utf8'}],animation:{width:640,height:360,durationMs:3000,loop:true,frames:[{at:0,values:{x:0}},{at:3000,values:{x:320}}]}}},
+    recovery:'驱动配置不等于在线连接；先让用户核对地址、端口和数据方向。源码或输入改变后重新 own_read_note，不把旧 job 结果写回当前单元。',
+  },
+  web:{
+    steps:['own_add_web_link(mode=preview|interactive) 保存网页卡片；interactive 仅表示请求交互','用户在 Own 画布点击“在画布中交互”，阅读来源、密码/令牌风险和 iframe 限制后确认；客户端保存 approvedOrigin','own_read_web_link 核对 approved、origin 和 mode；站点禁止 iframe 时使用系统浏览器打开'],
+    example:{tool:'own_add_web_link',arguments:{boardId:'画布ID',requestId:'web-001',title:'内部文档',url:'https://docs.example.com',mode:'interactive'}},
+    recovery:'MCP 永远不能设置 approvedOrigin/approvedAt。不要在嵌入网页中输入密码、令牌或银行卡信息。',
+  },
   analysis:{
     steps:['own_add_analysis 保存原始数据','own_analyze_data 查看 columns、统计及原始行号；按 nextOffset / nextGroupOffset 读完','own_chart_from_analysis 以该 contentHash 保存实际聚合图表'],
     example:{tool:'own_chart_from_analysis',arguments:{projectId:'返回的 projectId',requestId:'analysis-chart-001',noteId:'分析笔记ID',expectedHash:'读取返回的64位contentHash',title:'按类别求和',settings:{group:0,value:1,method:'sum',order:'source',chartType:'bar',filter:{column:1,operator:'greater',value:'0'}}}},

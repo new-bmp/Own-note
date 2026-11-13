@@ -90,8 +90,11 @@ internal sealed class MainWindow : Form
             core.NavigationStarting += (_, args) => {
                 if (IsWorkspaceUri(args.Uri)) SetPresentation(false);
                 if (args.Uri == "about:blank" || IsWorkspaceUri(args.Uri)) return;
-                args.Cancel = true;
-                if (args.IsUserInitiated) OpenExternal(args.Uri);
+                // Embedded interactive link cards use a sandboxed iframe. WebView2
+                // reports those frame loads as non-user-initiated navigation; let
+                // them load in the frame while still sending explicit top-level
+                // clicks to the system browser.
+                if (args.IsUserInitiated) { args.Cancel = true; OpenExternal(args.Uri); }
             };
             core.NewWindowRequested += (_, args) => {
                 args.Handled = true;

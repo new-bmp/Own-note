@@ -56,7 +56,7 @@ export function createMcpLab({jobs,debugging,readWorkspace,mutateWorkspace}){
       if(previous){if(previous.fingerprint!==hash(args))throw new Error('requestId 已用于不同的运行参数。');throw new Error('此执行请求已受理，但运行记录在服务重启后或清理后已不可用。先读取笔记和工作记录核查结果；只有确需再次执行时才使用新 requestId。')}
       if(kind!=='media'){
         const note=board.notes.find(n=>n.id===args.noteId)
-        if(note?.kind!=='code'||!note.cells.some(c=>c.id===args.cellId)||hash(note)!==args.expectedHash)throw new Error('代码单元不存在或笔记已修改，请先 own_read_note。')
+        if(!['code','program'].includes(note?.kind)||!note.cells.some(c=>c.id===args.cellId)||hash(note)!==args.expectedHash)throw new Error('可运行单元不存在或笔记已修改，请先 own_read_note。')
       }
       board.executionReceipts=[...(board.executionReceipts||[]).slice(-999),{requestId:args.requestId,kind,fingerprint:hash(args),at:Date.now()}]
       return {notebook}
@@ -76,7 +76,7 @@ export function createMcpLab({jobs,debugging,readWorkspace,mutateWorkspace}){
         const value=jobs.start('media',{assetId,type:args.type});run={id:value.id,kind,targetId,action,execution:args.execution}
       }else{
         const note=board.notes.find(n=>n.id===args.noteId),cell=note?.cells?.find(c=>c.id===args.cellId)
-        if(!cell||note.kind!=='code')throw new Error('代码单元不存在。先 own_read_note 获取 cells 和 contentHash。')
+        if(!cell||!['code','program'].includes(note.kind))throw new Error('可运行单元不存在。先 own_read_note 获取 cells 和 contentHash。')
         if(hash(note)!==args.expectedHash)throw new Error('代码笔记已修改，请重新读取后运行。')
         const input={language:cell.language,code:cell.code,stdin:cell.stdin}
         const value=kind==='debug'?debugging.start({...input,breakpoints:args.breakpoints||[],watches:args.watches||[]}):jobs.start('code',input)

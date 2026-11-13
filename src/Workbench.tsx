@@ -1,19 +1,22 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import type { CanvasNote, Board } from './model'
-import { Code2, ChartColumn, Bot, X, Check, ExternalLink } from 'lucide-react'
+import { Code2, ChartColumn, Bot, Cpu, X, Check, ExternalLink } from 'lucide-react'
 import { RichPreview } from './RichContent'
 import { agentOnline } from '../shared/concepts.js'
 import { conceptReady, conceptDependencyError } from '../shared/concepts.js'
 const CodeNotebook=lazy(()=>import('./CodeNotebook').then(m=>({default:m.CodeNotebook})))
+const ProgrammableBlock=lazy(()=>import('./ProgrammableBlock').then(m=>({default:m.ProgrammableBlock})))
 const DataAnalysis=lazy(()=>import('./DataAnalysis').then(m=>({default:m.DataAnalysis})))
-export const isWorkbenchNote=(note:CanvasNote)=>['code','analysis','concept'].includes(note.kind)
+export const isWorkbenchNote=(note:CanvasNote)=>['program','code','analysis','concept'].includes(note.kind)
 export const conceptLabels={pending:'待实现',running:'执行中',done:'已实现',blocked:'遇到阻塞',paused:'已暂停'}
 export function WorkbenchCard({note,onOpen}:{note:CanvasNote;onOpen:()=>void}){
-  const Icon=note.kind==='code'?Code2:note.kind==='analysis'?ChartColumn:Bot
-  return <div className="workbench-card"><header><Icon size={16}/><span>{note.kind==='code'?'多语言代码笔记':note.kind==='analysis'?'数据分析':conceptLabels[note.concept!.status]}</span>{note.kind==='concept'&&<span className={`concept-status status-${note.concept!.status}`}>{note.concept!.agentId||'等待 Agent'}</span>}</header><h3>{note.title}</h3>
-    {note.kind==='code'?<><p>{note.cells?.length||0} 个单元 · {Array.from(new Set(note.cells?.map(c=>c.language))).join(' / ')}</p><pre>{note.cells?.[0]?.code.slice(0,600)}</pre>{note.cells?.[0]?.output&&<pre className="code-card-result">{note.cells[0].output.slice(0,300)}</pre>}</>:note.kind==='analysis'?<pre>{note.analysisSource?.slice(0,650)}</pre>:<div className="concept-card-body"><RichPreview note={{...note,kind:'markdown',body:note.body?.slice(0,1200)}}/>{note.concept?.progress&&<p><strong>最新进展：</strong>{note.concept.progress}</p>}{note.concept?.status==='done'&&note.concept.evidence&&<p><strong>验证结果：</strong>{note.concept.evidence.slice(0,600)}</p>}</div>}
-    <button className="read-note-button" data-canvas-ui onClick={onOpen}><ExternalLink size={14}/>{note.kind==='concept'?'查看构想与执行':'打开工作台'}</button>
-  </div>
+  const Icon=note.kind==='program'?Cpu:note.kind==='code'?Code2:note.kind==='analysis'?ChartColumn:Bot
+  const content = note.kind === 'program' || note.kind === 'code'
+    ? <><p>{note.cells?.length || 0} 个单元 · {Array.from(new Set(note.cells?.map(c => c.language))).join(' / ')}</p><pre>{note.cells?.[0]?.code.slice(0, 600)}</pre>{note.cells?.[0]?.output && <pre className="code-card-result">{note.cells[0].output.slice(0, 300)}</pre>}{note.kind === 'program' && <p className="program-card-meta">{note.programDrivers?.length || 0} 个驱动 · {note.animation?.frames.length || 0} 个动画关键帧</p>}</>
+    : note.kind === 'analysis'
+      ? <pre>{note.analysisSource?.slice(0, 650)}</pre>
+      : <div className="concept-card-body"><RichPreview note={{ ...note, kind: 'markdown', body: note.body?.slice(0, 1200) }} />{note.concept?.progress && <p><strong>最新进展：</strong>{note.concept.progress}</p>}{note.concept?.status === 'done' && note.concept.evidence && <p><strong>验证结果：</strong>{note.concept.evidence.slice(0, 600)}</p>}</div>
+  return <div className="workbench-card"><header><Icon size={16} /><span>{note.kind === 'program' ? '可编程块' : note.kind === 'code' ? '兼容代码块' : note.kind === 'analysis' ? '数据分析' : conceptLabels[note.concept!.status]}</span>{note.kind === 'concept' && <span className={`concept-status status-${note.concept!.status}`}>{note.concept!.agentId || '等待 Agent'}</span>}</header><h3>{note.title}</h3>{content}<button className="read-note-button" data-canvas-ui onClick={onOpen}><ExternalLink size={14} />{note.kind === 'concept' ? '查看构想与执行' : '打开工作台'}</button></div>
 }
 export function WorkbenchEditor({note,board,destination='画布',onClose,onSave,onChart}:{note:CanvasNote;board:Board;destination?:'画布'|'项目';onClose:()=>void;onSave:(patch:Partial<CanvasNote>)=>void;onChart:(note:Partial<CanvasNote>)=>void}){
   const [draft,setDraft]=useState(note),[busy,setBusy]=useState(false),[error,setError]=useState('')
@@ -31,9 +34,9 @@ export function WorkbenchEditor({note,board,destination='画布',onClose,onSave,
     }
     onSave(draft)
   }
-  return <div className="modal-overlay workbench-overlay" onKeyDown={event=>{if(event.key==='Escape'){event.stopPropagation();if(!busy)onClose()}}}><section role="dialog" aria-modal="true" aria-label={`编辑${note.title}`} className="workbench-editor"><header className="workbench-editor-header"><div><strong>{note.kind==='code'?'代码学习与输入输出':note.kind==='analysis'?'数据分析工作台':'Next to do · 构想与执行'}</strong><small>{note.kind==='concept'?'修改未实现笔记，将在 Agent 下一次检查时生效。':'编辑内容会随笔记保存。'}</small></div><button className="icon-button" aria-label="关闭工作台" disabled={busy} onClick={onClose}><X size={20}/></button></header>
+  return <div className="modal-overlay workbench-overlay" onKeyDown={event=>{if(event.key==='Escape'){event.stopPropagation();if(!busy)onClose()}}}><section role="dialog" aria-modal="true" aria-label={`编辑${note.title}`} className="workbench-editor"><header className="workbench-editor-header"><div><strong>{note.kind==='program'?'可编程块 · 单元、动画与驱动':note.kind==='code'?'兼容代码块':note.kind==='analysis'?'数据分析工作台':'Next to do · 构想与执行'}</strong><small>{note.kind==='concept'?'修改未实现笔记，将在 Agent 下一次检查时生效。':note.kind==='program'?'支持分步运行、变量查看、动画预览与外部驱动配置。':'编辑内容会随笔记保存。'}</small></div><button className="icon-button" aria-label="关闭工作台" disabled={busy} onClick={onClose}><X size={20}/></button></header>
     <div className="workbench-editor-body"><label>标题<input aria-label="工作台笔记标题" value={draft.title||''} disabled={locked} onChange={e=>patch({title:e.target.value})}/></label>
-      <Suspense fallback={<p role="status">正在打开工作台…</p>}>{note.kind==='code'?<CodeNotebook note={draft} onChange={patch} onBusy={setBusy}/>:note.kind==='analysis'?<DataAnalysis note={draft} onChange={patch} onChart={onChart} destination={destination}/>:<>
+      <Suspense fallback={<p role="status">正在打开工作台…</p>}>{note.kind==='program'?<ProgrammableBlock note={draft} onChange={patch} onBusy={setBusy}/>:note.kind==='code'?<CodeNotebook note={draft} onChange={patch} onBusy={setBusy}/>:note.kind==='analysis'?<DataAnalysis note={draft} onChange={patch} onChart={onChart} destination={destination}/>:<>
       {locked&&<p className="lab-help">此任务已有完成记录。可查看证据；需要继续修改时点击“重新打开”，保留原结果。</p>}
       <label>构想与实现要求（Markdown）<textarea className="concept-source" aria-label="构想内容" value={draft.body||''} disabled={locked} maxLength={50000} onChange={e=>patch({body:e.target.value})}/></label>
       <label>验收标准<textarea aria-label="构想验收标准" value={draft.concept?.acceptance||''} disabled={locked} maxLength={12000} onChange={e=>patch({concept:{...draft.concept!,acceptance:e.target.value}})}/></label>

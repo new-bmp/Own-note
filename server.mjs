@@ -13,6 +13,7 @@ import { createMcpLab } from './mcp/workbench.mjs'
 import { createAssetTransfer } from './services/asset-transfer.mjs'
 import { createDebugSessions } from './services/debug.mjs'
 import { migrateAgentProjects } from './shared/agent-workspace.js'
+import { createProgramDrivers } from './services/program-drivers.mjs'
 
 const projectRoot = path.dirname(fileURLToPath(import.meta.url))
 const assetIdPattern = /^[a-zA-Z0-9_-]{1,128}$/
@@ -81,6 +82,7 @@ export async function createFieldnotesServer({
   const derivedDir = path.join(dataDir, 'derived')
   const jobs = createJobs({ assetsDir, derivedDir })
   const debugging = createDebugSessions()
+  const programDrivers = createProgramDrivers()
   await mkdir(assetsDir, { recursive: true })
   let writeQueue = Promise.resolve()
   const eventClients = new Set()
@@ -225,7 +227,7 @@ export async function createFieldnotesServer({
         }
         const mcp = createOwnMcpServer({
           readWorkspace,
-          mutateWorkspace,lab,jobs,assets,
+          mutateWorkspace,lab,jobs,assets,programDrivers,
           baseUrl: `http://${request.headers.host}`,
         })
         const transport = new StreamableHTTPServerTransport({
@@ -240,6 +242,20 @@ export async function createFieldnotesServer({
         return
       }
       if (pathname.startsWith('/api/')) {
+        if (pathname.startsWith('/api/program/drivers/')) {
+          const action = pathname.slice('/api/program/drivers/'.length)
+          let args = {}
+          if (request.method === 'POST') args = JSON.parse((await body(request, 200000)).toString('utf8'))
+          if (action === 'connect' && request.method === 'POST') {
+            if (args.confirmed !== true) return json(response, 403, { error: '连接前必须在 Own 客户端完成安全确认。' })
+            return json(response, 200, await programDrivers.connect(args.driver || args))
+          }
+          if (action === 'send' && request.method === 'POST') return json(response, 200, programDrivers.send(args.id, args.data, args.encoding))
+          if (action === 'read' && request.method === 'POST') return json(response, 200, programDrivers.read(args.id, args.offset, args.limit))
+          if (action === 'disconnect' && request.method === 'POST') return json(response, 200, await programDrivers.disconnect(args.id))
+          if (action === 'status' && request.method === 'GET') return json(response, 200, programDrivers.status(new URL(request.url, 'http://localhost').searchParams.get('id') || ''))
+          return json(response, 405, { error: '不支持的驱动接口。' })
+        }
         if (pathname.startsWith('/api/lab/')) {
           try {
             if(pathname==='/api/lab/debug'&&request.method==='POST')return json(response,202,debugging.start(JSON.parse((await body(request,600000)).toString('utf8'))))
@@ -439,6 +455,7 @@ export async function createFieldnotesServer({
     assets.close()
     jobs.close()
     debugging.close()
+    programDrivers.close()
     for (const response of eventClients) response.end()
     eventClients.clear()
     return close(callback)

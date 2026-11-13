@@ -68,6 +68,7 @@ import {
   GitBranch,
   ChartColumn,
   Code2,
+  Cpu,
   Undo2,
   Upload,
   X,
@@ -165,6 +166,7 @@ const kindNames: Record<NoteKind, string> = {
   diagram: 'Mermaid 图',
   chart: '数据图表',
   code: '多语言代码笔记',
+  program: '可编程块',
   analysis: '数据分析',
   concept: 'Agent 构想',
 }
@@ -175,6 +177,7 @@ const kindIcons = {
   diagram: GitBranch,
   chart: ChartColumn,
   code: Code2,
+  program: Cpu,
   analysis: ChartColumn,
   concept: Bot,
   text: Type,
@@ -362,6 +365,9 @@ export default function App({
   )
   const [modalTitle, setModalTitle] = useState('')
   const [linkEditing, setLinkEditing] = useState<string | null>(null)
+  const [linkMode, setLinkMode] = useState<'preview' | 'interactive'>('preview')
+  const [webApproval, setWebApproval] = useState<CanvasNote | null>(null)
+  const [interactiveLinkId, setInteractiveLinkId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [menu, setMenu] = useState<'add' | 'board' | null>(null)
   const [contextMenu, setContextMenu] = useState<{
@@ -413,6 +419,7 @@ export default function App({
     editingId ||
     preview ||
     linkEditing ||
+    webApproval ||
     interacting || importing
   )
 
@@ -1456,7 +1463,7 @@ export default function App({
       exportedBoard.description,
       ...exportedBoard.notes.map((note) => {
         if (note.kind === 'board') return `## 子画布：${notebook.boards.find(board => board.id === note.childBoardId)?.title || note.title}\n\n内容见后续画布章节。`
-        if (note.kind === 'code') return `## ${note.title}\n\n${note.body||''}\n\n${(note.cells||[]).map((cell,i)=>`### 单元 ${i+1}\n\n\`\`\`${cell.language}\n${cell.code}\n\`\`\`\n\n输入：\n\`\`\`text\n${cell.stdin}\n\`\`\`\n\n预期：\n\`\`\`text\n${cell.expected||''}\n\`\`\`\n\n实际输出：\n\`\`\`text\n${cell.output||''}\n${cell.error||''}\n\`\`\``).join('\n\n')}`
+        if (note.kind === 'program' || note.kind === 'code') return `## ${note.title}\n\n${note.body||''}\n\n${(note.cells||[]).map((cell,i)=>`### 单元 ${i+1}\n\n\`\`\`${cell.language}\n${cell.code}\n\`\`\`\n\n输入：\n\`\`\`text\n${cell.stdin}\n\`\`\`\n\n预期：\n\`\`\`text\n${cell.expected||''}\n\`\`\`\n\n实际输出：\n\`\`\`text\n${cell.output||''}\n${cell.error||''}\n\`\`\``).join('\n\n')}\n\n${note.kind === 'program' ? `驱动：${(note.programDrivers||[]).map(driver => `${driver.name || driver.type} ${driver.host || ''}:${driver.port || ''}`).join('、') || '无'}\n动画关键帧：${note.animation?.frames.length || 0}` : ''}`
         if (note.kind === 'analysis') return `## ${note.title}\n\n\`\`\`${note.analysisFormat||'csv'}\n${note.analysisSource||''}\n\`\`\``
         if (note.kind === 'concept') return `## ${note.title}\n\n状态：${note.concept?.status}\n\n${note.body||''}\n\n### 验收标准\n${note.concept?.acceptance||''}\n\n### 最新进展\n${note.concept?.progress||''}\n\n### 产物与验证\n${note.concept?.evidence||''}`
         if (note.kind === 'latex')
@@ -1629,8 +1636,18 @@ export default function App({
   function openResource(note: CanvasNote) {
     if (note.kind === 'link') {
       const url = safeUrl(note.url)
-      if (url) window.open(url, '_blank', 'noopener,noreferrer')
+      if (!url) return
+      const origin = new URL(url).origin
+      if (note.webInteraction?.mode === 'interactive') {
+        if (note.webInteraction.approvedOrigin === origin) setInteractiveLinkId(note.id)
+        else setWebApproval(note)
+      } else window.open(url, '_blank', 'noopener,noreferrer')
     } else void openFile(note)
+  }
+
+  function openInteractiveLink(note: CanvasNote) {
+    if (note.kind !== 'link') return
+    openResource(note)
   }
 
   function submitCapture(event: FormEvent) {
@@ -2026,6 +2043,10 @@ export default function App({
           </div>
         </>
       )
+    const url = safeUrl(note.url)
+    const approved = !!url && note.webInteraction?.approvedOrigin === new URL(url).origin
+    if (interactiveLinkId === note.id && note.webInteraction?.mode === 'interactive' && approved)
+      return <div className="interactive-link-frame" onPointerDown={event => event.stopPropagation()}><div className="interactive-link-toolbar"><span>交互网页 · {new URL(url).hostname} · 若页面空白，可能是网站禁止嵌入</span><button onClick={() => setInteractiveLinkId(null)}>退出交互</button><a href={url || undefined} target="_blank" rel="noreferrer">系统浏览器打开</a></div><iframe title={`交互网页：${note.title || url}`} src={url || undefined} sandbox="allow-forms allow-modals allow-popups allow-presentation allow-scripts allow-same-origin" referrerPolicy="no-referrer" /></div>
     return (
       <>
         <div className="link-top">
@@ -2033,23 +2054,12 @@ export default function App({
             <Link2 size={16} />
           </span>
           <span className="link-site">{note.body || 'WEB / 项目附件'}</span>
-          <a
-            href={safeUrl(note.url) || undefined}
-            target="_blank"
-            rel="noreferrer"
-            aria-label={`打开 ${note.title}`}
-          >
-            <ArrowUpRight size={16} />
-          </a>
+          {note.webInteraction?.mode === 'interactive' ? <button className="link-interactive-button" onClick={() => openInteractiveLink(note)} aria-label={`在画布中交互：${note.title}`}><MousePointer2 size={15} /></button> : <a href={url || undefined} target="_blank" rel="noreferrer" aria-label={`打开 ${note.title}`}><ArrowUpRight size={16} /></a>}
         </div>
         {editable(note, 'title', 'link-title')}
         <div className="link-bottom">
-          <span>
-            {safeUrl(note.url)
-              ? new URL(note.url!).hostname.replace(/^www\./, '')
-              : '添加一个网页'}
-          </span>
-          <span>↗</span>
+          <span>{url ? new URL(url).hostname.replace(/^www\./, '') : '添加一个网页'}</span>
+          {note.webInteraction?.mode === 'interactive' ? <button onClick={() => openInteractiveLink(note)}>在画布中交互</button> : <span>↗</span>}
         </div>
       </>
     )
@@ -2524,7 +2534,7 @@ export default function App({
                       'latex',
                       'diagram',
                       'chart',
-                      'code',
+                      'program',
                       'analysis',
                       'image',
                       'file',
@@ -2544,6 +2554,7 @@ export default function App({
                             const note = addNote(kind)
                             setSelectedId(note.id)
                             setModalTitle('https://')
+                            setLinkMode('preview')
                             setLinkEditing(note.id)
                           } else addNote(kind)
                           setMenu(null)
@@ -2868,6 +2879,7 @@ export default function App({
                             if (note.kind === 'link') {
                               setLinkEditing(note.id)
                               setModalTitle(note.url ?? 'https://')
+                              setLinkMode(note.webInteraction?.mode || 'preview')
                               return
                             }
                             setEditingId(note.id)
@@ -3768,6 +3780,19 @@ export default function App({
         </div>
       )}
 
+      {webApproval && (
+        <div className="modal-overlay" onPointerDown={event => { if (event.target === event.currentTarget) setWebApproval(null) }}>
+          <section className="modal web-approval-modal" role="dialog" aria-modal="true" aria-labelledby="web-approval-title">
+            <IconButton className="modal-close" label="关闭网页安全提示" onClick={() => setWebApproval(null)}><X size={19} /></IconButton>
+            <span className="modal-illustration"><Link2 size={28} /></span>
+            <h2 id="web-approval-title">确认交互网页</h2>
+            <p>这个网页来自 <strong>{safeUrl(webApproval.url) ? new URL(safeUrl(webApproval.url)).origin : '未知来源'}</strong>，确认后会嵌入当前画布，页面中的按钮、表单和脚本可能读取你主动输入的内容。</p>
+            <ul className="web-approval-list"><li>不要输入密码、令牌、银行卡或其他敏感信息。</li><li>部分网站禁止 iframe，加载失败时请用系统浏览器打开。</li><li>Own 不会把网页内容保存为笔记，交互只在当前卡片中进行。</li></ul>
+            <div className="modal-form-actions"><button className="secondary-button" onClick={() => setWebApproval(null)}>取消</button><button className="primary-button" onClick={() => { const url = safeUrl(webApproval.url); if (!url) return; const origin = new URL(url).origin; updateNote(webApproval.id, { webInteraction: { mode: 'interactive', approvedOrigin: origin, approvedAt: Date.now() } }); setWebApproval(null); setInteractiveLinkId(webApproval.id); notify('已确认网页来源，可以在画布中交互。') }}>我已了解，开始交互</button></div>
+          </section>
+        </div>
+      )}
+
       {linkEditing && (
         <div
           className="modal-overlay"
@@ -3790,6 +3815,9 @@ export default function App({
               updateNote(linkEditing, {
                 url,
                 body: new URL(url).hostname.toUpperCase(),
+                webInteraction: linkMode === 'interactive'
+                  ? { mode: 'interactive', ...(notebookRef.current.boards.flatMap(board => board.notes).find(note => note.id === linkEditing)?.webInteraction?.approvedOrigin === new URL(url).origin ? { approvedOrigin: new URL(url).origin, approvedAt: notebookRef.current.boards.flatMap(board => board.notes).find(note => note.id === linkEditing)?.webInteraction?.approvedAt } : {}) }
+                  : { mode: 'preview' },
               })
               setLinkEditing(null)
               notify('链接已保存。')
@@ -3806,7 +3834,7 @@ export default function App({
               <Link2 size={28} />
             </span>
             <h2>添加参考链接</h2>
-            <p>保存外部文档或参考页面。</p>
+            <p>保存外部文档；需要在画布中直接操作时，先选择交互模式。</p>
             <label className="field-label" htmlFor="link-url">
               网页地址
             </label>
@@ -3820,6 +3848,7 @@ export default function App({
               onChange={(event) => setModalTitle(event.target.value)}
               placeholder="https://"
             />
+            <fieldset className="link-mode-fieldset"><legend>打开方式</legend><label><input type="radio" name="link-mode" checked={linkMode === 'preview'} onChange={() => setLinkMode('preview')} />普通预览（系统浏览器）</label><label><input type="radio" name="link-mode" checked={linkMode === 'interactive'} onChange={() => setLinkMode('interactive')} />交互网页（首次操作需安全确认）</label></fieldset>
             <div className="modal-form-actions">
               <button
                 type="button"
