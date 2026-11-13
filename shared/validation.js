@@ -164,6 +164,13 @@ export function validNotebook(value) {
           if (!animation || !Number.isInteger(animation.width) || animation.width < 1 || animation.width > 10000 || !Number.isInteger(animation.height) || animation.height < 1 || animation.height > 10000 || !Number.isInteger(animation.durationMs) || animation.durationMs < 1 || animation.durationMs > 86400000 || typeof animation.loop !== 'boolean' || !Array.isArray(animation.frames) || animation.frames.length > 1000 || !animation.frames.every(frame => frame && Number.isFinite(frame.at) && frame.at >= 0 && frame.at <= animation.durationMs && frame.values && typeof frame.values === 'object' && !Array.isArray(frame.values) && Object.keys(frame.values).length <= 100 && Object.values(frame.values).every(value => typeof value === 'string' || typeof value === 'boolean' || Number.isFinite(value)))) return false
           if (!['program','code'].includes(note.kind)) return false
         }
+        if (note.programApp !== undefined) {
+          const app = note.programApp
+          if (!app || app.framework !== 'flask' || typeof app.enabled !== 'boolean' ||
+            (app.entryCellId !== undefined && (typeof app.entryCellId !== 'string' || app.entryCellId.length < 1 || app.entryCellId.length > 128)) ||
+            (app.port !== undefined && (!Number.isInteger(app.port) || app.port < 1024 || app.port > 65535))) return false
+          if (!['program', 'code'].includes(note.kind)) return false
+        }
         if (!optionalString(note.analysisSource,2000000) || note.analysisFormat!==undefined&&!['csv','tsv','json'].includes(note.analysisFormat)) return false
         if (note.analysisSettings !== undefined) {
           const settings = note.analysisSettings

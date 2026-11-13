@@ -36,7 +36,8 @@ own_save_conversation({
 - own_add_chart：保存柱状图、折线图或饼图，同时保留可查看的数据表。
 - own_update_note：按 contentHash 修改一张卡片，保留用户其他内容。
 - own_add_code：兼容旧客户端的多语言代码卡片；新项目请使用 own_add_program。
-- own_add_program：保存可编程块的多语言 cells、动画关键帧和 TCP/Serial over LAN 驱动配置；由用户或 own_run_program 显式运行。
+- own_add_program：保存一体化可编程块的多语言 cells、Flask 应用配置、动画关键帧和 TCP/Serial over LAN 驱动配置；由用户或 own_run_program 显式运行。
+- own_configure_program_app / own_start_program_app：选择 Python 单元启动本机 Flask 界面；own_program_app_request 测试接口并读取响应，own_program_app_status 查看日志，own_stop_program_app 释放进程和端口。
 - own_add_web_link：保存网页预览或交互请求；交互必须由 Own 客户端显示安全提示并由用户批准，MCP 不能代为批准。
 - own_add_analysis：校验并保存 CSV / TSV / JSON 原始数据，在工作台中进行可复现分析。
 
@@ -52,7 +53,7 @@ Own 在内部代码、调试和媒体执行中强制验证 execution（taskId、
 ## 新功能的完整工作流程
 所有笔记工具接受 boardId 或 projectId，二者选一。先 own_read_note 获取 note、单元ID与 contentHash，再用 own_update_note 和 expectedHash 条件更新；冲突后重读，不自动覆盖。更新还支持位置/大小、代码单元、表格、分析数据与设置、mediaSettings、modelSettings。
 
-- 可编程块：own_add_program 保存 cells、drivers 和 animation；先 own_read_note，再用 own_run_program 或 own_start_program_debug 显式运行/调试，own_program_result 读取流式 stdout/stderr、变量和是否写回。own_configure_program_driver 保存 TCP、Serial over LAN、UDP、WebSocket 参数；own_connect_program_driver、own_send_program_data 和 own_read_program_stream 都遵守客户端确认，不能替用户连接外部设备。动画在 Own 客户端本地 requestAnimationFrame 预览。旧 own_add_code / own_run_code 仍可读取旧笔记。
+- 可编程块：own_add_program 保存 cells、programApp、drivers 和 animation；先 own_read_note，再用 own_configure_program_app 选择 Python 单元，own_start_program_app 启动一体化 Flask 界面，Own 通过本机代理嵌入预览并支持 own_program_app_request 测试 GET/POST/JSON 响应、own_program_app_status 读取日志、own_stop_program_app 释放端口。Own 优先使用真实 Flask；嵌入式 Python 没有 Flask 时提供离线兼容层，支持常用路由、request、jsonify、HTML 响应。own_run_program 或 own_start_program_debug 仍用于普通单元，own_program_result 读取流式 stdout/stderr、变量和是否写回。own_configure_program_driver 保存 TCP、Serial over LAN、UDP、WebSocket 参数；own_connect_program_driver、own_send_program_data 和 own_read_program_stream 都遵守客户端确认，不能替用户连接外部设备。动画在 Own 客户端本地 requestAnimationFrame 预览。旧 own_add_code / own_run_code 仍可读取旧笔记。
 - 网页交互：own_add_web_link(mode=interactive) 或 own_set_web_link_mode 只保存请求。用户在画布点击“在画布中交互”时阅读来源、输入风险和 iframe 限制提示，确认后 Own 才保存 approvedOrigin；MCP 不能写入批准字段。
 - 分析：own_add_analysis 保存完整CSV/TSV/JSON；own_analyze_data 返回列、原始行号、分页筛选结果、统计和分组。settings 的 group/value/filter.column/sort.column 是从0开始的列索引，返回行号从1开始且不含表头。own_chart_from_analysis 使用 expectedHash 和设置从真实原始数据制图，保存来源hash、计算方式、行数；超过60组会注明。own_add_chart 也可直接传 grid（第一行表头、第一列类别）。
 - 文件：own_upload_asset start(filename,size,sha256,requestId,mime) → chunk(uploadId,offset,data为Base64) → commit(uploadId)；每块最多256KB、单文件100MB，乱序或SHA错误会拒绝。重试start和chunk保持相同参数，commit可重试。服务重启后未完成上传需重新start。own_add_attachment 使用 assetId 保存任意文件，folder.entries 传相对路径与已上传ID，自动补父目录、保留空目录；模型的贴图/缓冲文件一同导入，modelPath 选择主模型。own_read_attachment 分页浏览目录或按字节读取原文件，读到nextOffset=null可按SHA无损核验。
@@ -93,6 +94,11 @@ export const toolCatalog = [
   ['own_program_result', '读取可编程块运行状态'],
   ['own_configure_program_driver', '配置 TCP / Serial over LAN 驱动'],
   ['own_set_program_animation', '保存可编程块动画关键帧'],
+  ['own_configure_program_app', '配置 Flask 应用入口与端口'],
+  ['own_start_program_app', '启动可编程块内的 Flask 界面'],
+  ['own_program_app_status', '查看应用状态、日志与请求数'],
+  ['own_program_app_request', '测试应用接口并读取响应'],
+  ['own_stop_program_app', '停止应用并释放端口'],
   ['own_connect_program_driver', '请求用户确认后连接驱动'],
   ['own_send_program_data', '向已确认驱动发送数据'],
   ['own_read_program_stream', '读取驱动接收缓冲'],

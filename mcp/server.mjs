@@ -19,6 +19,7 @@ import {
   modelSettingsSchema,
   programDriverSchema,
   programAnimationSchema,
+  programAppSchema,
   webInteractionRequestSchema,
 } from './schemas.mjs'
 import { ownGuide } from './guide.mjs'
@@ -138,6 +139,7 @@ function plainText(note) {
     ...(note.cells||[]).flatMap(c=>[c.code,c.stdin,c.output,c.error]),
     ...(note.programDrivers||[]).flatMap(driver=>[driver.name,driver.type,driver.host,driver.port]),
     ...(note.animation?.frames||[]).flatMap(frame=>Object.entries(frame.values||{}).map(([key,value])=>`${key} ${value}`)),
+    note.programApp?.framework,
     note.analysisSource,note.concept?.acceptance,note.concept?.progress,note.concept?.evidence,note.concept?.nextAction,
     ...(note.entries||[]).map(e=>e.path),
     ...(note.items?.map((item) => `${item.text} ${item.owner || ''}`) || []),
@@ -155,10 +157,10 @@ export function createOwnMcpServer({
   readWorkspace,
   mutateWorkspace,
   baseUrl = 'http://127.0.0.1:5173',
-  lab, jobs, assets, programDrivers,
+  lab, jobs, assets, programDrivers, programApps,
 }) {
   const server = new McpServer(
-    { name: 'own-notes', version: '1.5.0', title: 'Own 笔记' },
+    { name: 'own-notes', version: '1.6.0', title: 'Own 笔记' },
     { instructions: ownGuide, maxToolInputElements: 12000 },
   )
   const boardUrl = (boardId, noteId) =>
@@ -708,7 +710,7 @@ export function createOwnMcpServer({
       analysisSource:z.string().max(2000000).optional(),analysisFormat:z.enum(['csv','tsv','json']).optional(),analysisSettings:analysisSettingsSchema.optional(),
       x:z.number().finite().min(-1000000).max(1000000).optional(),y:z.number().finite().min(-1000000).max(1000000).optional(),width:z.number().finite().min(80).max(10000).optional(),height:z.number().finite().min(60).max(10000).optional(),
       mediaSettings:mediaSettingsSchema.optional(),modelSettings:modelSettingsSchema.optional(),
-      webInteraction:webInteractionRequestSchema.optional(),programDrivers:z.array(programDriverSchema).max(32).optional(),animation:programAnimationSchema.optional(),
+      webInteraction:webInteractionRequestSchema.optional(),programDrivers:z.array(programDriverSchema).max(32).optional(),animation:programAnimationSchema.optional(),programApp:programAppSchema.optional(),
       items: z.array(action.extend({ id })).max(80).optional(),
     },
     { ...appendOnly, destructiveHint: true, idempotentHint: false },
@@ -738,6 +740,7 @@ export function createOwnMcpServer({
           (args.items !== undefined && previous.kind !== 'checklist') ||
           (args.cells!==undefined&&!['code','program'].includes(previous.kind)) ||
           ((args.programDrivers!==undefined||args.animation!==undefined)&&!['code','program'].includes(previous.kind)) ||
+          (args.programApp!==undefined&&!['code','program'].includes(previous.kind)) ||
           (['analysisSource','analysisFormat','analysisSettings'].some(k=>args[k]!==undefined)&&previous.kind!=='analysis') ||
           (['columns','rows'].some(k=>args[k]!==undefined)&&previous.kind!=='table') ||
           ((args.mediaSettings||args.modelSettings)&&!['file','folder'].includes(previous.kind))
@@ -763,10 +766,10 @@ export function createOwnMcpServer({
 
   registerWorkbenchTools({tool,lab,jobs,assets,readWorkspace,getBoard,append,makeCard,receipt,mutateWorkspace,readOnly,appendOnly})
   registerWebTools({tool,readWorkspace,mutateWorkspace,getBoard,append,makeCard,receipt,readOnly,appendOnly,boardUrl})
-  registerProgramTools({tool,lab,programDrivers,readWorkspace,mutateWorkspace,getBoard,append,makeCard,receipt,readOnly,appendOnly})
+  registerProgramTools({tool,lab,programDrivers,programApps,readWorkspace,mutateWorkspace,getBoard,append,makeCard,receipt,readOnly,appendOnly})
   registerAttachmentTools({tool,assets,readWorkspace,mutateWorkspace,getBoard,append,makeCard,receipt,readOnly,appendOnly,boardUrl})
   tool('own_read_note','完整读取一张笔记','读取单张笔记、代码单元、数据源码、媒体/模型设置或工作记录；返回 contentHash 用于条件更新。任务执行凭证不会通过读取工具暴露。',{...target,noteId:id},readOnly,async args=>{const {notebook}=await readWorkspace(),board=getBoard(notebook,args.boardId),note=board.notes.find(n=>n.id===args.noteId);if(!note)throw new Error('笔记不存在。');return {boardId:board.id,projectId:notebook.agentProjects?.some(p=>p.id===board.id)?board.id:undefined,note:publicNote(note),contentHash:contentHash(note),url:boardUrl(board.id,note.id)}})
-  tool('own_capabilities','发现所有功能与调用范例','连接后先调用，按任务发现工具、运行环境、支持格式、输入示例和长期工作协议。保存不会自动执行，运行/调试须显式调用。',{feature:z.enum(['all','canvas','agent','code','program','web','analysis','attachments','connections','authoring']).default('all')},readOnly,async args=>({version:'1.5.0',help:args.feature==='all'?featureHelp:featureHelp[args.feature],tools:registered.filter(t=>args.feature==='all'||({canvas:/board/,agent:/agent|plan/,code:/code|debug|lab/,program:/program|driver|animation/,web:/web_link/,analysis:/analy|chart/,attachments:/asset|attachment|media/,connections:/connect/,authoring:/note|latex|diagram|chart|conversation/}[args.feature]).test(t.name)),runtime:args.feature==='all'||args.feature==='code'||args.feature==='program'?await jobs.runtimes():undefined,formats:{code:'JS/TS/Python/SQLite/C/C++/Java/Go/Rust execution; JS/TS/Python/C/C++ debugging; HTML/CSS/JSON/Markdown editing',program:'可编程 cells、分步调试、变量查看、requestAnimationFrame 动画、TCP/Serial over LAN/UDP/WebSocket 驱动',web:'http/https 预览；交互 iframe 需要用户在客户端确认来源',data:['csv','tsv','json','xlsx via UI import'],charts:['bar','line','pie'],models:['glb','gltf','obj','stl','ply','fbx','3mf'],attachments:'任意格式完整保存，folder.entries 保留目录和模型配套文件；媒体通过 FFmpeg 转兼容格式'},workflow:'长期工作先 own_read_agent_project → own_agent_next → 每30秒 own_agent_report → own_agent_checkpoint → 附证据 done。每次领取都返回最新项目约束。项目暂停/任务变更会拒绝旧执行，且停止 Own 内绑定的运行。',examples:{project:{tool:'own_create_agent_project',arguments:{requestId:'new-project-001',title:'数据报告',goal:'分析来源数据并写清结论',scope:'仅处理指定资料',constraints:'保留原始数据；禁止凭空补值',acceptance:'图表可复现，附验证记录'}},program:{tool:'own_add_program',arguments:{boardId:'实际画布ID',requestId:'program-001',title:'设备动画',cells:[{language:'javascript',code:'console.log("ready")',stdin:''}],drivers:[{type:'tcp',host:'192.168.1.10',port:5000}],animation:{width:640,height:360,durationMs:3000,loop:true,frames:[{at:0,values:{x:0}},{at:3000,values:{x:320}}]}}},web:{tool:'own_add_web_link',arguments:{boardId:'实际画布ID',requestId:'web-001',title:'交互文档',url:'https://docs.example.com',mode:'interactive'}},run:{tool:'own_run_program',arguments:{projectId:'实际项目ID',requestId:'run-001',noteId:'可编程块ID',cellId:'读取到的单元ID',expectedHash:'own_read_note返回的contentHash',execution:{taskId:'已领取任务ID',agentId:'当前AgentID',leaseToken:'own_agent_next返回的token',revision:'own_agent_next返回的revision'}}}},guide:'own://guide',limitation:'文字范围约束需协作 Agent 遵守；Own 不能强制停止其他客户端的外部操作，不读取隐藏推理；网页交互和外部驱动连接始终需要客户端用户确认。'}))
+  tool('own_capabilities','发现所有功能与调用范例','连接后先调用，按任务发现工具、运行环境、支持格式、输入示例和长期工作协议。保存不会自动执行，运行/调试须显式调用。',{feature:z.enum(['all','canvas','agent','code','program','web','analysis','attachments','connections','authoring']).default('all')},readOnly,async args=>({version:'1.6.0',help:args.feature==='all'?featureHelp:featureHelp[args.feature],tools:registered.filter(t=>args.feature==='all'||({canvas:/board/,agent:/agent|plan/,code:/code|debug|lab/,program:/program|driver|animation|app/,web:/web_link/,analysis:/analy|chart/,attachments:/asset|attachment|media/,connections:/connect/,authoring:/note|latex|diagram|chart|conversation/}[args.feature]).test(t.name)),runtime:args.feature==='all'||args.feature==='code'||args.feature==='program'?await jobs.runtimes():undefined,formats:{code:'JS/TS/Python/SQLite/C/C++/Java/Go/Rust execution; JS/TS/Python/C/C++ debugging; HTML/CSS/JSON/Markdown editing',program:'一体化可编程块：多语言 cells、分步调试、变量查看、Flask 应用界面与 HTTP 响应、requestAnimationFrame 动画、TCP/Serial over LAN/UDP/WebSocket 驱动',web:'http/https 预览；交互 iframe 需要用户在客户端确认来源',data:['csv','tsv','json','xlsx via UI import'],charts:['bar','line','pie'],models:['glb','gltf','obj','stl','ply','fbx','3mf'],attachments:'任意格式完整保存，folder.entries 保留目录和模型配套文件；媒体通过 FFmpeg 转兼容格式'},workflow:'长期工作先 own_read_agent_project → own_agent_next → 每30秒 own_agent_report → own_agent_checkpoint → 附证据 done。每次领取都返回最新项目约束。项目暂停/任务变更会拒绝旧执行，且停止 Own 内绑定的运行。',examples:{project:{tool:'own_create_agent_project',arguments:{requestId:'new-project-001',title:'数据报告',goal:'分析来源数据并写清结论',scope:'仅处理指定资料',constraints:'保留原始数据；禁止凭空补值',acceptance:'图表可复现，附验证记录'}},program:{tool:'own_add_program',arguments:{boardId:'实际画布ID',requestId:'program-001',title:'响应面板',cells:[{language:'python',code:'from flask import Flask, request, jsonify\\nimport os\\napp = Flask(__name__)\\n@app.get("/")\\ndef home(): return "<h1>Own</h1>"\\n@app.post("/echo")\\ndef echo(): return jsonify(received=request.get_json(silent=True))\\nif __name__ == "__main__": app.run(host="127.0.0.1", port=int(os.environ.get("OWN_APP_PORT", "5000")))',stdin:''}],app:{framework:'flask',enabled:true},drivers:[{type:'tcp',host:'127.0.0.1',port:5000}]}},web:{tool:'own_add_web_link',arguments:{boardId:'实际画布ID',requestId:'web-001',title:'交互文档',url:'https://docs.example.com',mode:'interactive'}},run:{tool:'own_run_program',arguments:{projectId:'实际项目ID',requestId:'run-001',noteId:'可编程块ID',cellId:'读取到的单元ID',expectedHash:'own_read_note返回的contentHash',execution:{taskId:'已领取任务ID',agentId:'当前AgentID',leaseToken:'own_agent_next返回的token',revision:'own_agent_next返回的revision'}}},app:{tool:'own_start_program_app',arguments:{projectId:'实际项目ID',noteId:'可编程块ID',expectedHash:'own_read_note返回的contentHash',requestId:'app-001',execution:'仅 Agent 项目需要的最新任务凭证'}}},guide:'own://guide',limitation:'文字范围约束需协作 Agent 遵守；Own 不能强制停止其他客户端的外部操作，不读取隐藏推理；网页交互、外部驱动连接和可编程应用启动始终需要客户端用户确认。'}))
 
   server.registerResource(
     'own-guide',
@@ -829,7 +832,7 @@ export function createOwnMcpServer({
     {title:'恢复长期 Agent 工作',description:'先读取用户最新目标、约束、公开方案与工作记录，再领取任务；按心跳和检查点协议执行。',argsSchema:{projectId:z.string(),agentId:z.string()}},
     async ({projectId,agentId})=>({messages:[{role:'user',content:{type:'text',text:`${ownGuide}\n恢复已授权项目，参数：${JSON.stringify({projectId,agentId})}。先 own_read_agent_project，分页读取任务和相关方案/工作记录。确认目标、范围、约束、验收后再 own_agent_next。每30秒与关键动作前上报；长期工作保存 own_agent_checkpoint，完成附实际证据。项目暂停或 needsReplan 时停止旧执行。`}}]}),
   )
-  server.registerResource('own-capabilities','own://capabilities',{title:'Own 功能与工具目录',mimeType:'application/json'},async uri=>({contents:[{uri:uri.href,mimeType:'application/json',text:JSON.stringify({version:'1.5.0',tools:registered,guide:'own://guide',runtimeTool:'own_capabilities'})}]}))
+  server.registerResource('own-capabilities','own://capabilities',{title:'Own 功能与工具目录',mimeType:'application/json'},async uri=>({contents:[{uri:uri.href,mimeType:'application/json',text:JSON.stringify({version:'1.6.0',tools:registered,guide:'own://guide',runtimeTool:'own_capabilities'})}]}))
   server.registerResource('own-agent-projects','own://agent-projects',{title:'长期 Agent 项目目录',mimeType:'application/json'},async uri=>{const {notebook}=await readWorkspace();return {contents:[{uri:uri.href,mimeType:'application/json',text:JSON.stringify((notebook?.agentProjects||[]).filter(p=>!p.trashed).map(p=>({...describeBoard(p),projectId:p.id,paused:projectBrief(p).paused})))}]}})
   server.registerResource('own-agent-project',new ResourceTemplate('own://agent-projects/{projectId}',{list:undefined}),{title:'长期 Agent 项目的目标与恢复入口',mimeType:'application/json'},async(uri,{projectId})=>{const {notebook}=await readWorkspace(),project=getBoard(notebook,projectId);if(!notebook.agentProjects?.some(p=>p.id===project.id))throw new Error('需要独立 Agent 项目。');return {contents:[{uri:uri.href,mimeType:'application/json',text:JSON.stringify({projectId:project.id,title:project.title,brief:projectBrief(project),projectRevision:projectRevision(project),taskCount:project.notes.filter(n=>n.kind==='concept').length,nextStep:{tool:'own_read_agent_project',arguments:{projectId:project.id}}})}]}})
   server.registerPrompt(

@@ -103,10 +103,16 @@ url = "http://127.0.0.1:5173/mcp"
 | `own_add_chart` | 用数值或数据表添加图表 |
 | `own_update_note` | 按版本更新内容、设置和布局 |
 | `own_add_code` | 保存多语言代码与输入输出示例 |
+| `own_add_program` / `own_update_program` | 保存一体化可编程块、应用、驱动和动画 |
 | `own_run_code` | 显式运行代码并保存真实结果 |
+| `own_run_program` / `own_start_program_debug` | 运行或调试可编程块单元 |
 | `own_start_debug` | 开始真实单步调试 |
 | `own_lab_result` | 读取流式输出、变量与保存结果 |
 | `own_debug_command` | 单步、调用栈、断点与停止 |
+| `own_configure_program_app` | 选择 Python 单元作为 Flask 应用入口 |
+| `own_start_program_app` / `own_stop_program_app` | 启动或停止画布内 Flask 界面 |
+| `own_program_app_status` | 查看应用状态、日志和请求数 |
+| `own_program_app_request` | 发送测试请求并读取状态、响应头和正文 |
 | `own_add_analysis` | 保存完整原始分析数据 |
 | `own_analyze_data` | 筛选、排序、统计与聚合 |
 | `own_chart_from_analysis` | 从真实分析保存可追溯图表 |
@@ -118,7 +124,7 @@ url = "http://127.0.0.1:5173/mcp"
 | `own_connect_notes` | 创建笔记之间的关系 |
 | `own_update_connection` | 按版本修改关系样式 |
 
-共35个工具。`own_capabilities({feature})` 按功能返回工具、步骤、示例和恢复指引；`tools/list` 提供完整参数。资源包括 `own://guide`、`own://capabilities`、`own://boards`、`own://boards/{boardId}`、`own://agent-projects`、`own://agent-projects/{projectId}`。提示模板包括 `organize_conversation` 和 `resume_agent_project`。HTTP和stdio提供相同功能。
+工具目录会随版本扩展，以 `own_capabilities({feature})` 和 `tools/list` 返回的实际列表为准；前者按功能返回调用步骤、示例和恢复指引，后者提供完整参数。资源包括 `own://guide`、`own://capabilities`、`own://boards`、`own://boards/{boardId}`、`own://agent-projects`、`own://agent-projects/{projectId}`。提示模板包括 `organize_conversation` 和 `resume_agent_project`。HTTP和stdio提供相同功能。
 
 ## 公式、图与数据
 
@@ -160,6 +166,7 @@ Own 在内部代码、调试和媒体执行中强制验证 execution（taskId、
 所有笔记工具接受 boardId 或 projectId，二者选一。先 own_read_note 获取 note、单元ID与 contentHash，再用 own_update_note 和 expectedHash 条件更新；冲突后重读，不自动覆盖。更新还支持位置/大小、代码单元、表格、分析数据与设置、mediaSettings、modelSettings。
 
 - 代码：own_add_code 保存多语言 cells（language、code、stdin、expected）；own_run_code 显式运行一个已保存单元，own_lab_result 读取流式stdout/stderr和是否保存。相同 requestId 重试不重跑；最近1000条执行受理记录持久保存，服务重启后旧请求会要求核查结果，不自动重跑。运行进程与未保存的输出不会跨重启恢复。用户改源码或有更新运行时，旧结果不写回；保存工具本身不执行代码。own_start_debug 开始真实 JS/TS/Python/C/C++ 调试；own_debug_command 的 next/step/out/continue/pause/frame/configure/stop 控制执行，own_lab_result 查看真实行、变量、观察、调用栈。运行语言与可用工具链先看 own_capabilities.runtime，编辑语言不一定可执行。
+- 一体化可编程应用：own_add_program 保存 Python 单元和 `app:{framework:"flask",enabled:true}`；先 own_read_note 获取 `contentHash`，用 own_configure_program_app 选择入口单元和端口，再 own_start_program_app 启动。应用只监听本机回环地址，Own 通过代理把 HTML 界面嵌回可编程块；own_program_app_request 可测试 GET/POST/PUT/PATCH/DELETE、JSON 或文本正文，并返回状态、响应头和正文；own_program_app_status 返回日志和请求数，own_stop_program_app 释放进程。嵌入式 Python 没有 Flask 时会启用离线兼容层，保存配置本身不会启动应用。
 - 分析：own_add_analysis 保存完整CSV/TSV/JSON；own_analyze_data 返回列、原始行号、分页筛选结果、统计和分组。settings 的 group/value/filter.column/sort.column 是从0开始的列索引，返回行号从1开始且不含表头。own_chart_from_analysis 使用 expectedHash 和设置从真实原始数据制图，保存来源hash、计算方式、行数；超过60组会注明。own_add_chart 也可直接传 grid（第一行表头、第一列类别）。
 - 文件：own_upload_asset start(filename,size,sha256,requestId,mime) → chunk(uploadId,offset,data为Base64) → commit(uploadId)；每块最多256KB、单文件100MB，乱序或SHA错误会拒绝。重试start和chunk保持相同参数，commit可重试。服务重启后未完成上传需重新start。own_add_attachment 使用 assetId 保存任意文件，folder.entries 传相对路径与已上传ID，自动补父目录、保留空目录；模型的贴图/缓冲文件一同导入，modelPath 选择主模型。own_read_attachment 分页浏览目录或按字节读取原文件，读到nextOffset=null可按SHA无损核验。
 - 媒体和3D：附件按文件名进入对应查看器。mediaSettings={speed:1,volume:1,loop:false,start:0,marks:[{time:12,label:'关键说明'}]}；modelSettings={wireframe:false,grid:true,autoRotate:false}，可创建时传入或条件更新，客户端查看器实际应用。own_convert_media 显式转换为MP3/MP4，own_lab_result 等待success后 own_save_media_result 将缓存结果保存为永久附件；并非所有编码都能解码，失败不修改原文件。

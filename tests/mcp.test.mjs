@@ -837,7 +837,7 @@ test('stdio bridge exposes the same tools and persists through the running HTTP 
   })
   const client = await app.connect(transport)
   assert.equal((await client.listTools()).tools.length, toolCatalog.length, errors)
-  assert.equal(client.getServerVersion().version,'1.5.0')
+  assert.equal(client.getServerVersion().version,'1.6.0')
   const response = await client.callTool({
     name: 'own_save_conversation',
     arguments: {

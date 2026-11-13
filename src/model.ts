@@ -117,6 +117,12 @@ export interface ProgramAnimation {
   loop: boolean
   frames: ProgramFrame[]
 }
+export interface ProgramApp {
+  framework: 'flask'
+  enabled: boolean
+  entryCellId?: string
+  port?: number
+}
 export interface ConceptState { planId: string; status: 'pending' | 'running' | 'done' | 'blocked' | 'paused'; acceptance: string; dependsOn: string[]; agentId?: string; progress?: string; evidence?: string; nextAction?: string; blockers?: string[]; artifactIds?: string[]; checkpointId?: string; lease?: { token: string; revision: string; projectRevision?: string; expiresAt: number }; history?: { at: number; text: string }[] }
 export interface AgentBrief { goal: string; scope: string; constraints: string; acceptance: string; paused: boolean; allowCode: boolean; allowMedia: boolean }
 export interface AgentPresence { id: string; name: string; lastSeenAt: number; currentNoteId?: string; summary?: string }
@@ -165,6 +171,7 @@ export interface CanvasNote {
   webInteraction?: WebInteraction
   programDrivers?: ProgramDriver[]
   animation?: ProgramAnimation
+  programApp?: ProgramApp
   analysisSource?: string
   analysisFormat?: 'csv' | 'tsv' | 'json'
   analysisSettings?: AnalysisSettings
@@ -240,7 +247,7 @@ export function makeNote(kind: NoteKind, x: number, y: number): CanvasNote {
     case 'code':
       return { ...base, width: 560, height: 420, title: '代码实验笔记', body: '修改代码与输入，运行并比较输出。', cells: [{ id: uid(), language: 'javascript', code: 'const input = await new Promise(resolve => { let text = ""; process.stdin.on("data", chunk => text += chunk); process.stdin.on("end", () => resolve(text)); });\nconst numbers = input.trim().split(/\\s+/).map(Number);\nconsole.log(numbers.reduce((sum, value) => sum + value, 0));', stdin: '3 5 8', expected: '16\n' }] }
     case 'program':
-      return { ...base, width: 620, height: 560, title: '可编程块', body: '按单元运行代码、观察变量，连接设备或制作动画。', cells: [{ id: uid(), language: 'javascript', code: 'const input = await new Promise(resolve => { let text = ""; process.stdin.on("data", chunk => text += chunk); process.stdin.on("end", () => resolve(text)); });\nconst numbers = input.trim().split(/\\s+/).map(Number);\nconsole.log(numbers.reduce((sum, value) => sum + value, 0));', stdin: '3 5 8', expected: '16\n' }], programDrivers: [], animation: { width: 640, height: 360, durationMs: 3000, loop: true, frames: [{ at: 0, values: { x: 0, y: 0, opacity: 1 } }, { at: 3000, values: { x: 320, y: 180, opacity: 1 } }] } }
+      return { ...base, width: 620, height: 560, title: '可编程块', body: '按单元运行代码、观察变量，连接设备、制作动画或启动 Flask 应用。', cells: [{ id: uid(), language: 'javascript', code: 'const input = await new Promise(resolve => { let text = ""; process.stdin.on("data", chunk => text += chunk); process.stdin.on("end", () => resolve(text)); });\nconst numbers = input.trim().split(/\\s+/).map(Number);\nconsole.log(numbers.reduce((sum, value) => sum + value, 0));', stdin: '3 5 8', expected: '16\n' }], programDrivers: [], animation: { width: 640, height: 360, durationMs: 3000, loop: true, frames: [{ at: 0, values: { x: 0, y: 0, opacity: 1 } }, { at: 3000, values: { x: 320, y: 180, opacity: 1 } }] }, programApp: { framework: 'flask', enabled: false } }
     case 'analysis':
       return { ...base, width: 520, height: 360, title: '数据分析', analysisFormat: 'csv', analysisSource: '日期,类别,金额\n2026-11-01,设计,120\n2026-11-02,开发,350\n2026-11-03,设计,180\n2026-11-04,开发,420' }
     case 'concept':
@@ -672,6 +679,7 @@ export function noteSearchText(note: CanvasNote): string {
     note.source?.agent,
     ...(note.programDrivers?.map((driver) => `${driver.name || ''} ${driver.type} ${driver.host || ''} ${driver.port || ''}`) ?? []),
     ...(note.animation?.frames.flatMap((frame) => Object.entries(frame.values).map(([key, value]) => `${key} ${value}`)) ?? []),
+    note.programApp?.framework,
     ...(note.entries?.map((entry) => entry.path) ?? []),
     ...(note.items?.map((i) => `${i.text} ${i.owner || ''}`) ?? []),
     ...(note.chart?.labels ?? []),

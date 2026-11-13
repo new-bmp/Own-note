@@ -14,6 +14,7 @@ import { createAssetTransfer } from './services/asset-transfer.mjs'
 import { createDebugSessions } from './services/debug.mjs'
 import { migrateAgentProjects } from './shared/agent-workspace.js'
 import { createProgramDrivers } from './services/program-drivers.mjs'
+import { createProgramApps } from './services/program-apps.mjs'
 
 const projectRoot = path.dirname(fileURLToPath(import.meta.url))
 const assetIdPattern = /^[a-zA-Z0-9_-]{1,128}$/
@@ -83,6 +84,7 @@ export async function createFieldnotesServer({
   const jobs = createJobs({ assetsDir, derivedDir })
   const debugging = createDebugSessions()
   const programDrivers = createProgramDrivers()
+  const programApps = createProgramApps()
   await mkdir(assetsDir, { recursive: true })
   let writeQueue = Promise.resolve()
   const eventClients = new Set()
@@ -227,7 +229,7 @@ export async function createFieldnotesServer({
         }
         const mcp = createOwnMcpServer({
           readWorkspace,
-          mutateWorkspace,lab,jobs,assets,programDrivers,
+          mutateWorkspace,lab,jobs,assets,programDrivers,programApps,
           baseUrl: `http://${request.headers.host}`,
         })
         const transport = new StreamableHTTPServerTransport({
@@ -242,6 +244,29 @@ export async function createFieldnotesServer({
         return
       }
       if (pathname.startsWith('/api/')) {
+        if (pathname === '/api/program/apps/start' && request.method === 'POST') {
+          try {
+            const args = JSON.parse((await body(request, 300000)).toString('utf8'))
+            const id = args.id || randomUUID()
+            return json(response, 200, await programApps.start({ ...args, id }))
+          } catch (error) { return json(response, 400, { error: error.message }) }
+        }
+        const programApp = pathname.match(/^\/api\/program\/apps\/([a-zA-Z0-9_-]{1,128})(?:\/(status|stop|request|proxy)(?:\/(.*))?)?$/)
+        if (programApp) {
+          const [, id, action = 'status', tail = ''] = programApp
+          try {
+            if (action === 'status' && request.method === 'GET') return json(response, 200, programApps.status(id))
+            if (action === 'stop' && request.method === 'POST') return json(response, 200, await programApps.stop(id))
+            if (action === 'request' && request.method === 'POST') return json(response, 200, await programApps.request(id, JSON.parse((await body(request, 300000)).toString('utf8'))))
+            if (action === 'proxy') {
+              const url = new URL(request.url, 'http://localhost')
+              const route = `/${tail}${url.search}`.replace(/^\/+/, '/') || '/'
+              await programApps.proxy(request, response, id, route)
+              return
+            }
+            return json(response, 405, { error: '不支持的可编程应用接口。' })
+          } catch (error) { return json(response, error.code === 'ENOENT' ? 404 : 400, { error: error.message }) }
+        }
         if (pathname.startsWith('/api/program/drivers/')) {
           const action = pathname.slice('/api/program/drivers/'.length)
           let args = {}
@@ -456,6 +481,7 @@ export async function createFieldnotesServer({
     jobs.close()
     debugging.close()
     programDrivers.close()
+    programApps.close()
     for (const response of eventClients) response.end()
     eventClients.clear()
     return close(callback)
