@@ -994,7 +994,9 @@ kbd {
   overflow: hidden;
   border-radius: 5px;
   background: #e1e6d7;
+  cursor: pointer;
 }
+.photo-wrap:focus-visible, .file-main:focus-visible { outline:2px solid var(--accent-line); outline-offset:-2px; border-radius:7px; }
 .photo-wrap img {
   width: 100%;
   height: 100%;
@@ -1366,7 +1368,11 @@ kbd {
   flex: 1;
   padding-bottom: 15px;
   min-width: 0;
+  cursor: pointer;
+  border-radius: 7px;
+  transition: background .15s ease;
 }
+.file-main:hover { background: #f8faf5; }
 .file-art {
   height: 44px;
   width: 35px;

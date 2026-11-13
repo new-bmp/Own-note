@@ -271,10 +271,11 @@ function AssetImage({
   return (
     <div
       className="photo-wrap"
-      onDoubleClick={(e) => {
-        e.stopPropagation()
-        onOpen()
-      }}
+      role="button"
+      tabIndex={0}
+      aria-label={`预览${note.title || '图片'}`}
+      onClick={(e) => { if (!(e.target as HTMLElement).closest('[data-canvas-ui]')) onOpen() }}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } }}
     >
       {url ? (
         <img src={url} draggable={false} alt={note.title || '画布上的照片'} />
@@ -284,7 +285,7 @@ function AssetImage({
           <span>图片暂时无法读取</span>
         </div>
       )}
-      <span className="photo-expand" title="双击查看图片">
+      <span className="photo-expand" title="点击预览图片">
         <Expand size={14} />
       </span>
     </div>
@@ -2016,7 +2017,7 @@ export default function App({
     if (note.kind === 'file')
       return (
         <>
-          <div className="file-main">
+          <div className="file-main" role="button" tabIndex={0} aria-label={`预览 ${note.filename || '文件'}`} onClick={() => void openFile(note)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void openFile(note) } }}>
             <div className="file-art">
               <FileText size={23} strokeWidth={1.4} />
               <span>
@@ -2042,7 +2043,7 @@ export default function App({
               className="file-download"
               title="查看文件内容"
               aria-label={`查看 ${note.filename}`}
-              onClick={() => void openFile(note)}
+              onClick={(event) => { event.stopPropagation(); void openFile(note) }}
             >
               <FolderOpen size={15} />
             </button>
