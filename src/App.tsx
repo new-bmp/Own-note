@@ -72,6 +72,8 @@ import {
   Undo2,
   Upload,
   X,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react'
 import {
   arrangeNotes,
@@ -368,6 +370,7 @@ export default function App({
   const [linkMode, setLinkMode] = useState<'preview' | 'interactive'>('preview')
   const [webApproval, setWebApproval] = useState<CanvasNote | null>(null)
   const [interactiveLinkId, setInteractiveLinkId] = useState<string | null>(null)
+  const [interactiveZoom, setInteractiveZoom] = useState(1)
   const [search, setSearch] = useState('')
   const [menu, setMenu] = useState<'add' | 'board' | null>(null)
   const [contextMenu, setContextMenu] = useState<{
@@ -454,6 +457,10 @@ export default function App({
     media.addEventListener('change', change)
     return () => media.removeEventListener('change', change)
   }, [])
+
+  useEffect(() => {
+    setInteractiveZoom(1)
+  }, [interactiveLinkId])
 
   useEffect(() => {
     if (!modal && !linkEditing && !preview && !richEditing && !reading) return
@@ -1650,6 +1657,10 @@ export default function App({
     openResource(note)
   }
 
+  function changeInteractiveZoom(delta: number) {
+    setInteractiveZoom(current => Math.max(0.5, Math.min(2, Number((current + delta).toFixed(1)))))
+  }
+
   function submitCapture(event: FormEvent) {
     event.preventDefault()
     const text = captureText.trim()
@@ -2046,7 +2057,7 @@ export default function App({
     const url = safeUrl(note.url)
     const approved = !!url && note.webInteraction?.approvedOrigin === new URL(url).origin
     if (interactiveLinkId === note.id && note.webInteraction?.mode === 'interactive' && approved)
-      return <div className="interactive-link-frame" onPointerDown={event => event.stopPropagation()}><div className="interactive-link-toolbar"><span>交互网页 · {new URL(url).hostname} · 若页面空白，可能是网站禁止嵌入</span><button onClick={() => setInteractiveLinkId(null)}>退出交互</button><a href={url || undefined} target="_blank" rel="noreferrer">系统浏览器打开</a></div><iframe title={`交互网页：${note.title || url}`} src={url || undefined} sandbox="allow-forms allow-modals allow-popups allow-presentation allow-scripts allow-same-origin" referrerPolicy="no-referrer" /></div>
+      return <div className="interactive-link-frame" onPointerDown={event => event.stopPropagation()}><div className="interactive-link-toolbar"><span>交互网页 · {new URL(url).hostname} · 若页面空白，可能是网站禁止嵌入</span><div className="interactive-link-zoom" role="group" aria-label="网页缩放"><button onClick={() => changeInteractiveZoom(-0.1)} disabled={interactiveZoom <= 0.5} aria-label="缩小网页" title="缩小网页"><ZoomOut size={13} /></button><button className="interactive-link-zoom-value" onClick={() => setInteractiveZoom(1)} aria-label="重置网页缩放" title="重置为 100%">{Math.round(interactiveZoom * 100)}%</button><button onClick={() => changeInteractiveZoom(0.1)} disabled={interactiveZoom >= 2} aria-label="放大网页" title="放大网页"><ZoomIn size={13} /></button></div><button onClick={() => setInteractiveLinkId(null)}>退出交互</button><a href={url || undefined} target="_blank" rel="noreferrer">系统浏览器打开</a></div><div className="interactive-link-viewport"><iframe title={`交互网页：${note.title || url}`} src={url || undefined} style={{ width: `${100 / interactiveZoom}%`, height: `${100 / interactiveZoom}%`, transform: `scale(${interactiveZoom})`, transformOrigin: 'top left' }} sandbox="allow-forms allow-modals allow-popups allow-presentation allow-scripts allow-same-origin" referrerPolicy="no-referrer" /></div></div>
     return (
       <>
         <div className="link-top">

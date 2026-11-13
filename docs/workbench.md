@@ -30,6 +30,10 @@
 
 Own 优先使用真实 Flask。随包嵌入式 Python 没有第三方包时，会启用离线兼容层，支持常用的 `Flask`、`@app.route` / `@app.get` / `@app.post`、`request.args`、`request.form`、`request.get_json`、`jsonify`、`render_template_string`、`redirect` 和 HTML 响应；需要 Flask 扩展或完整 Jinja 能力时，在自己的 Python 环境中安装真实 Flask 后再运行。应用由用户显式启动，MCP 也不会在保存时自动执行。
 
+可编程块顶部会显示「准备入口 → 启动应用 → 预览与验证 → 扩展功能」四步提示。代码单元是主要编辑区，动画和设备驱动默认收起，需要时再展开，避免把所有控制项同时堆在一起。
+
+交互网页卡片进入画布后，工具栏提供 50%–200% 的网页内部缩放、百分比重置和独立滚动视口；缩放只影响当前网页显示，不会改变画布卡片尺寸。
+
 安装组件、来源及许可见 [随包工具说明](toolchains.md)。
 
 代码是在本机执行，具有当前用户权限；只主动运行理解且信任的代码。MCP 的 `own_add_code` 只保存，不自动执行。HTML 的隔离预览不会获得 Own 工作空间或本机文件访问权限。
